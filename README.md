@@ -167,7 +167,7 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 
 | 配置项                       | 建议值         | 说明                                 |
 | ---------------------------- | -------------- | ------------------------------------ |
-| server.address               | :8080          | TCP 监听地址                         |
+| server.address               | :9583          | TCP 监听地址                         |
 | server.max_connections       | 10000          | 最大连接数                           |
 | server.queue_size            | 50000          | 消息队列大小                         |
 | server.worker_count          | 100            | Worker 数量                          |
@@ -272,7 +272,7 @@ API 分为 option 形式（底层）与 ctx 形式（便捷）两套，详见 [`
 ```go
 // 初始化
 logtrack.Init(&Config{
-    GatewayAddr: "logtrack-gateway:8080",
+    GatewayAddr: "log-track:9583",
     ServiceName: "loan-backend",
     Logger:      slog.Default(), // 可选，默认 slog.Default()
 })
@@ -333,7 +333,7 @@ logtrack.Error("failed to query database", // → topic=app-logs
 
 | 配置项          | 建议值 | 说明                                    |
 | --------------- | ------ | --------------------------------------- |
-| gateway_addr    | :8080  | Gateway 地址                            |
+| gateway_addr    | log-track:9583 | Gateway 地址（默认值，可通过 Config.GatewayAddr 覆盖） |
 | max_conns       | 4      | 最多 TCP 连接数（shard 数量），按需懒建 |
 | connect_timeout | 3s     | 建立 TCP 连接超时                       |
 | write_timeout   | 1s     | 单次消息写入超时                        |

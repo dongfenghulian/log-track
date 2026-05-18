@@ -3,7 +3,7 @@
 // Usage:
 //
 //	logtrack.Init(&logtrack.Config{
-//	    GatewayAddr: "logtrack-gateway:8080",
+//	    GatewayAddr: "log-track:9583", // optional, this is the default
 //	    ServiceName: "loan-backend",
 //	})
 //	defer logtrack.Close()
@@ -27,6 +27,7 @@ import (
 )
 
 const (
+	defaultGatewayAddr    = "log-track:9583"
 	defaultMaxConns       = 4
 	defaultConnectTimeout = 3 * time.Second
 	defaultWriteTimeout   = 1 * time.Second
@@ -96,8 +97,9 @@ func New(cfg *Config) (*Client, error) {
 	if cfg == nil {
 		return nil, errors.New("logtrack: nil config")
 	}
-	if cfg.GatewayAddr == "" {
-		return nil, errors.New("logtrack: GatewayAddr is required")
+	addr := cfg.GatewayAddr
+	if addr == "" {
+		addr = defaultGatewayAddr
 	}
 	if cfg.ServiceName == "" {
 		return nil, errors.New("logtrack: ServiceName is required")
@@ -128,7 +130,7 @@ func New(cfg *Config) (*Client, error) {
 		shards[i] = &shardConn{}
 	}
 	return &Client{
-		addr:           cfg.GatewayAddr,
+		addr:           addr,
 		service:        cfg.ServiceName,
 		host:           host,
 		connectTimeout: connectTO,

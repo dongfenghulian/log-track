@@ -47,7 +47,7 @@ type ShutdownConfig struct {
 func Load() Config {
 	return Config{
 		Server: ServerConfig{
-			Address:        getString("LOG_TRACK_SERVER_ADDRESS", ":8080"),
+			Address:        getString("LOG_TRACK_SERVER_ADDRESS", ":9583"),
 			MaxConnections: getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 10000),
 			QueueSize:      getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 50000),
 			WorkerCount:    getInt("LOG_TRACK_SERVER_WORKER_COUNT", 100),

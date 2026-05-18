@@ -16,7 +16,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	c := Load()
-	if c.Server.Address != ":8080" {
+	if c.Server.Address != ":9583" {
 		t.Errorf("address=%q", c.Server.Address)
 	}
 	if c.Server.QueueSize != 50000 {

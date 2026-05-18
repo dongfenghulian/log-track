@@ -234,15 +234,20 @@ func TestEncodeFrame_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestNew_RequiresGatewayAndService(t *testing.T) {
+func TestNew_RequiresServiceName(t *testing.T) {
 	if _, err := New(nil); err == nil {
 		t.Errorf("nil cfg should error")
 	}
-	if _, err := New(&Config{ServiceName: "svc"}); err == nil {
-		t.Errorf("missing GatewayAddr should error")
-	}
 	if _, err := New(&Config{GatewayAddr: "x:1"}); err == nil {
 		t.Errorf("missing ServiceName should error")
+	}
+	// GatewayAddr now defaults to log-track:9583, so omitting it is allowed.
+	c, err := New(&Config{ServiceName: "svc"})
+	if err != nil {
+		t.Errorf("missing GatewayAddr should fall back to default, got error: %v", err)
+	}
+	if c != nil && c.addr != defaultGatewayAddr {
+		t.Errorf("default addr=%q want %q", c.addr, defaultGatewayAddr)
 	}
 }
 

@@ -168,7 +168,7 @@ import (
 
 | 环境变量                              | 默认值           | 说明                                 |
 | ------------------------------------- | ---------------- | ------------------------------------ |
-| `LOG_TRACK_SERVER_ADDRESS`            | `:8080`          | TCP 监听地址                         |
+| `LOG_TRACK_SERVER_ADDRESS`            | `:9583`          | TCP 监听地址                         |
 | `LOG_TRACK_SERVER_MAX_CONNECTIONS`    | `10000`          | 最大连接数                           |
 | `LOG_TRACK_SERVER_QUEUE_SIZE`         | `50000`          | 消息队列大小                         |
 | `LOG_TRACK_SERVER_WORKER_COUNT`       | `100`            | Worker 数量                          |
@@ -227,7 +227,7 @@ SDK 不直接读环境变量（业务方进程的环境不归 SDK 管），通�
 
 ```bash
 go build -o bin/gateway ./cmd/gateway
-LOG_TRACK_SERVER_ADDRESS=:8080 LOG_TRACK_KAFKA_BROKERS=kafka1:9092,kafka2:9092 ./bin/gateway
+LOG_TRACK_SERVER_ADDRESS=:9583 LOG_TRACK_KAFKA_BROKERS=kafka1:9092,kafka2:9092 ./bin/gateway
 ```
 
 ### 6.2 SDK 用法（业务方）
@@ -240,7 +240,7 @@ go get github.com/dongfenghulian/log-track/pkg/logtrack
 import "github.com/dongfenghulian/log-track/pkg/logtrack"
 
 logtrack.Init(&logtrack.Config{
-    GatewayAddr: "logtrack-gateway:8080",
+    GatewayAddr: "log-track:9583",
     ServiceName: "loan-backend",
 })
 defer logtrack.Close()
