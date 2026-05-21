@@ -3,6 +3,8 @@ package writer
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -19,16 +21,21 @@ type KafkaWriter struct {
 	brokers      []string
 	batchSize    int
 	batchTimeout time.Duration
+	writeTimeout time.Duration
 
 	mu      sync.Mutex
 	writers map[string]*kafka.Writer
 }
 
-func NewKafkaWriter(brokers []string, batchSize int, batchTimeout time.Duration) *KafkaWriter {
+func NewKafkaWriter(brokers []string, batchSize int, batchTimeout, writeTimeout time.Duration) *KafkaWriter {
+	if writeTimeout <= 0 {
+		writeTimeout = 2 * time.Second
+	}
 	return &KafkaWriter{
 		brokers:      brokers,
 		batchSize:    batchSize,
 		batchTimeout: batchTimeout,
+		writeTimeout: writeTimeout,
 		writers:      map[string]*kafka.Writer{},
 	}
 }
@@ -39,14 +46,18 @@ func (k *KafkaWriter) writerFor(topic string) *kafka.Writer {
 	if w, ok := k.writers[topic]; ok {
 		return w
 	}
+	// RequireOne: leader-only ack. Throughput-optimized.
+	// LogTrack is an observability system; the fallback file path covers durability.
+	// If you need at-least-once on the broker side, switch to RequireAll.
 	w := &kafka.Writer{
 		Addr:         kafka.TCP(k.brokers...),
 		Topic:        topic,
 		Balancer:     &kafka.Hash{},
 		BatchSize:    k.batchSize,
 		BatchTimeout: k.batchTimeout,
-		RequiredAcks: kafka.RequireAll,
+		RequiredAcks: kafka.RequireOne,
 		Async:        false,
+		WriteTimeout: k.writeTimeout,
 	}
 	k.writers[topic] = w
 	return w
@@ -62,7 +73,7 @@ func (k *KafkaWriter) Write(env *envelope.Envelope) error {
 		return err
 	}
 	w := k.writerFor(env.Topic)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), k.writeTimeout)
 	defer cancel()
 	msg := kafka.Message{Value: body}
 	if env.TraceID != "" {
@@ -105,4 +116,31 @@ func (k *KafkaWriter) Close() error {
 	}
 	k.writers = nil
 	return firstErr
+}
+
+// Probe verifies that at least one broker is reachable by establishing a TCP control connection
+// and reading the broker list. It writes nothing — meant for health-recovery checks where we
+// don't want to inject probe messages into business topics.
+func (k *KafkaWriter) Probe(ctx context.Context) error {
+	if len(k.brokers) == 0 {
+		return errors.New("no brokers configured")
+	}
+	d := &kafka.Dialer{Timeout: 3 * time.Second}
+	var lastErr error
+	for _, addr := range k.brokers {
+		conn, err := d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		// Reading broker metadata exercises the Kafka protocol, not just the TCP socket;
+		// distinguishes "TCP open but service down" from "fully healthy".
+		_, err = conn.Brokers()
+		_ = conn.Close()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("kafka probe failed: %w", lastErr)
 }

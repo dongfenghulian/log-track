@@ -35,11 +35,14 @@ func main() {
 	cfg := config.Load()
 	logger.Info("config loaded",
 		"address", cfg.Server.Address,
+		"metrics_address", cfg.Server.MetricsAddress,
 		"brokers", cfg.Kafka.Brokers,
-		"workers", cfg.Server.WorkerCount)
+		"max_connections", cfg.Server.MaxConnections,
+		"queue_capacity", cfg.Server.QueueSize,
+		"worker_goroutines", cfg.Server.WorkerCount)
 
 	// Wire writers.
-	kafkaWriter := writer.NewKafkaWriter(cfg.Kafka.Brokers, cfg.Kafka.BatchSize, cfg.Kafka.BatchTimeout)
+	kafkaWriter := writer.NewKafkaWriter(cfg.Kafka.Brokers, cfg.Kafka.BatchSize, cfg.Kafka.BatchTimeout, cfg.Kafka.WriteTimeout)
 	fallbackWriter, err := writer.NewFallbackWriter(cfg.Fallback.DataDir, cfg.Fallback.MaxFileSize, cfg.Fallback.MaxFiles)
 	if err != nil {
 		logger.Error("failed to init fallback writer", "err", err)

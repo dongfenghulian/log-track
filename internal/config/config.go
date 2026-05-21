@@ -29,6 +29,7 @@ type KafkaConfig struct {
 	Brokers      []string
 	BatchSize    int
 	BatchTimeout time.Duration
+	WriteTimeout time.Duration
 }
 
 type FallbackConfig struct {
@@ -38,9 +39,9 @@ type FallbackConfig struct {
 }
 
 type ShutdownConfig struct {
-	Timeout            time.Duration
-	ConnReadTimeout    time.Duration
-	KafkaFlushTimeout  time.Duration
+	Timeout           time.Duration
+	ConnReadTimeout   time.Duration
+	KafkaFlushTimeout time.Duration
 }
 
 // Load reads all LOG_TRACK_* env vars, applying defaults where unset.
@@ -48,16 +49,17 @@ func Load() Config {
 	return Config{
 		Server: ServerConfig{
 			Address:        getString("LOG_TRACK_SERVER_ADDRESS", ":9583"),
-			MaxConnections: getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 10000),
-			QueueSize:      getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 50000),
-			WorkerCount:    getInt("LOG_TRACK_SERVER_WORKER_COUNT", 100),
+			MaxConnections: getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 1024),
+			QueueSize:      getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 1000),
+			WorkerCount:    getInt("LOG_TRACK_SERVER_WORKER_COUNT", 20),
 			MaxMessageSize: getInt("LOG_TRACK_SERVER_MAX_MESSAGE_SIZE", 10*1024*1024),
-			MetricsAddress: getString("LOG_TRACK_METRICS_ADDRESS", ":9090"),
+			MetricsAddress: getString("LOG_TRACK_METRICS_ADDRESS", ":9584"),
 		},
 		Kafka: KafkaConfig{
 			Brokers:      splitCSV(getString("LOG_TRACK_KAFKA_BROKERS", "kafka:9092")),
 			BatchSize:    getInt("LOG_TRACK_KAFKA_BATCH_SIZE", 100),
-			BatchTimeout: getDuration("LOG_TRACK_KAFKA_BATCH_TIMEOUT", 5*time.Second),
+			BatchTimeout: getDuration("LOG_TRACK_KAFKA_BATCH_TIMEOUT", 500*time.Millisecond),
+			WriteTimeout: getDuration("LOG_TRACK_KAFKA_WRITE_TIMEOUT", 2*time.Second),
 		},
 		Fallback: FallbackConfig{
 			DataDir:     getString("LOG_TRACK_FALLBACK_DATA_DIR", "/data/logtrack"),
@@ -65,8 +67,8 @@ func Load() Config {
 			MaxFiles:    getInt("LOG_TRACK_FALLBACK_MAX_FILES", 10),
 		},
 		Shutdown: ShutdownConfig{
-			Timeout:           getDuration("LOG_TRACK_SHUTDOWN_TIMEOUT", 10*time.Second),
-			ConnReadTimeout:   getDuration("LOG_TRACK_SHUTDOWN_CONN_READ_TIMEOUT", 5*time.Second),
+			Timeout:           getDuration("LOG_TRACK_SHUTDOWN_TIMEOUT", 5*time.Second),
+			ConnReadTimeout:   getDuration("LOG_TRACK_SHUTDOWN_CONN_READ_TIMEOUT", 3*time.Second),
 			KafkaFlushTimeout: getDuration("LOG_TRACK_SHUTDOWN_KAFKA_FLUSH_TIMEOUT", 3*time.Second),
 		},
 	}

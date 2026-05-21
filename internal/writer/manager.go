@@ -92,19 +92,29 @@ func (m *Manager) recoveryLoop() {
 
 // tryRecover replays one fallback record. If Kafka accepts it, mark healthy and drain the rest.
 // Drain is bounded by recoveryInterval so we don't hold the loop hostage.
+//
+// When the fallback queue is empty, we still need to know whether Kafka has come back, so we
+// perform a side-effect-free metadata probe instead of optimistically flipping healthy. That
+// avoids the flapping pattern "fallback empty → healthy=true → next write fails → healthy=false"
+// which kept appearing in logs when a topic didn't exist.
 func (m *Manager) tryRecover() {
 	probe, ok := m.fallback.Peek()
 	if !ok {
-		// Nothing to replay; just probe Kafka with a no-op (we have no obvious probe message).
-		// Mark healthy optimistically; next real write will validate.
+		// Nothing to replay: probe Kafka directly. Only flip healthy on a successful probe.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := m.kafka.Probe(ctx); err != nil {
+			m.logger.Debug("kafka probe failed; staying unhealthy", "err", err)
+			return
+		}
 		m.healthy.Store(true)
 		metrics.KafkaHealthy(true)
-		m.logger.Info("kafka health flipped to true (no fallback to replay)")
+		m.logger.Info("kafka probe succeeded; health restored")
 		return
 	}
 	if err := m.kafka.Write(probe.Env); err != nil {
 		metrics.FallbackReplay("error")
-		m.logger.Warn("kafka still unhealthy", "err", err)
+		m.logger.Warn("kafka still unhealthy", "topic", probe.Env.Topic, "err", err)
 		return
 	}
 	m.fallback.Ack(probe)
@@ -122,7 +132,7 @@ func (m *Manager) tryRecover() {
 		}
 		if err := m.kafka.Write(rec.Env); err != nil {
 			metrics.FallbackReplay("error")
-			m.logger.Warn("kafka write failed during drain; staying unhealthy", "err", err)
+			m.logger.Warn("kafka write failed during drain; staying unhealthy", "topic", rec.Env.Topic, "err", err)
 			m.healthy.Store(false)
 			metrics.KafkaHealthy(false)
 			return

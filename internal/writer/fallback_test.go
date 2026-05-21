@@ -185,3 +185,51 @@ func TestFallback_HandlesGarbageLines(t *testing.T) {
 		t.Errorf("expected garbage line skipped, got topics=%q", joined)
 	}
 }
+
+func TestFallback_AdoptsStaleLogOnStartup(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate a previous process: write some envelopes, then "crash" without closing
+	// (no rotate, leave the .log behind).
+	fw1, _ := NewFallbackWriter(dir, 1024*1024, 10)
+	for i := 0; i < 3; i++ {
+		if err := fw1.Write(&envelope.Envelope{
+			Version: envelope.Version, Topic: "t",
+			Timestamp: int64(i), Data: json.RawMessage(`{}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Crash: don't call Close(), just abandon the writer. Active file remains as *.log.
+	logs, _ := filepath.Glob(filepath.Join(dir, "*.log"))
+	dones, _ := filepath.Glob(filepath.Join(dir, "*.log.done"))
+	if len(logs) != 1 || len(dones) != 0 {
+		t.Fatalf("pre-crash state: logs=%v dones=%v", logs, dones)
+	}
+
+	// New process boots: NewFallbackWriter should rename the orphan .log to .log.done.
+	fw2, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fw2.Close()
+
+	logs, _ = filepath.Glob(filepath.Join(dir, "*.log"))
+	dones, _ = filepath.Glob(filepath.Join(dir, "*.log.done"))
+	if len(logs) != 0 || len(dones) != 1 {
+		t.Fatalf("post-adopt state: logs=%v dones=%v", logs, dones)
+	}
+
+	// And the records inside should be replayable.
+	var seen []int64
+	for {
+		rec, ok := fw2.Peek()
+		if !ok {
+			break
+		}
+		seen = append(seen, rec.Env.Timestamp)
+	}
+	if len(seen) != 3 {
+		t.Errorf("after adopt, expected 3 records, got %v", seen)
+	}
+}

@@ -53,7 +53,7 @@ func TestSmokeFallbackPath(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	kw := writer.NewKafkaWriter(cfg.Kafka.Brokers, cfg.Kafka.BatchSize, cfg.Kafka.BatchTimeout)
+	kw := writer.NewKafkaWriter(cfg.Kafka.Brokers, cfg.Kafka.BatchSize, cfg.Kafka.BatchTimeout, cfg.Kafka.WriteTimeout)
 	fw, err := writer.NewFallbackWriter(cfg.Fallback.DataDir, cfg.Fallback.MaxFileSize, cfg.Fallback.MaxFiles)
 	if err != nil {
 		t.Fatalf("fallback init: %v", err)

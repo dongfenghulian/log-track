@@ -59,11 +59,41 @@ func NewFallbackWriter(dir string, maxFileSize int64, maxFiles int) (*FallbackWr
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create fallback dir: %w", err)
 	}
-	return &FallbackWriter{
+	fw := &FallbackWriter{
 		dir:         dir,
 		maxFileSize: maxFileSize,
 		maxFiles:    maxFiles,
-	}, nil
+	}
+	if err := fw.adoptStaleLogs(); err != nil {
+		return nil, fmt.Errorf("adopt stale logs: %w", err)
+	}
+	// Reflect any adopted .log.done files in the gauge.
+	if dones, err := fw.listDoneFiles(); err == nil {
+		metrics.FallbackFilesSet(len(dones))
+	}
+	return fw, nil
+}
+
+// adoptStaleLogs renames any *.log left over from a prior process into *.log.done so they
+// become eligible for replay by the recovery loop. Without this, a crash mid-write strands
+// the active file: Peek() only reads .log.done, so the data sits forever invisible.
+func (f *FallbackWriter) adoptStaleLogs() error {
+	entries, err := os.ReadDir(f.dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".log.done") {
+			continue
+		}
+		from := filepath.Join(f.dir, name)
+		to := from + ".done"
+		if err := os.Rename(from, to); err != nil {
+			return fmt.Errorf("rename %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // Write appends one envelope as a JSON line. Rotates the active file when it exceeds maxFileSize.

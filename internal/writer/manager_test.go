@@ -66,7 +66,7 @@ func TestManager_WriteRoutesToFallbackWhenUnhealthy(t *testing.T) {
 	}
 	// kafka writer is unused on this path, but we need to construct one. Use unreachable to keep
 	// it from doing anything.
-	kw := NewKafkaWriter([]string{"127.0.0.1:1"}, 1, time.Millisecond)
+	kw := NewKafkaWriter([]string{"127.0.0.1:1"}, 1, time.Millisecond, 200*time.Millisecond)
 
 	m := NewManager(kw, fw, 100*time.Millisecond, silentLogger())
 	defer func() {
@@ -94,5 +94,29 @@ func TestManager_WriteRoutesToFallbackWhenUnhealthy(t *testing.T) {
 	dones, _ := filepath.Glob(filepath.Join(dir, "*.log.done"))
 	if len(dones) == 0 {
 		t.Fatal("nothing rotated to .log.done")
+	}
+}
+
+func TestManager_TryRecover_KeepsUnhealthyWhenFallbackEmptyAndProbeFails(t *testing.T) {
+	dir := t.TempDir()
+	fw, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unreachable broker → Probe fails. Earlier code would optimistically flip healthy=true here.
+	kw := NewKafkaWriter([]string{"127.0.0.1:1"}, 1, time.Millisecond, 200*time.Millisecond)
+
+	m := NewManager(kw, fw, 100*time.Millisecond, silentLogger())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		m.Shutdown(ctx)
+	}()
+
+	m.healthy.Store(false)
+	m.tryRecover()
+
+	if m.healthy.Load() {
+		t.Errorf("tryRecover with no fallback and failing probe must NOT flip healthy=true")
 	}
 }

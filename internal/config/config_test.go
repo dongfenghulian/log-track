@@ -19,22 +19,25 @@ func TestLoad_Defaults(t *testing.T) {
 	if c.Server.Address != ":9583" {
 		t.Errorf("address=%q", c.Server.Address)
 	}
-	if c.Server.QueueSize != 50000 {
+	if c.Server.QueueSize != 1000 {
 		t.Errorf("queue_size=%d", c.Server.QueueSize)
 	}
 	if len(c.Kafka.Brokers) != 1 || c.Kafka.Brokers[0] != "kafka:9092" {
 		t.Errorf("brokers=%v", c.Kafka.Brokers)
 	}
-	if c.Kafka.BatchTimeout != 5*time.Second {
+	if c.Kafka.BatchTimeout != 500*time.Millisecond {
 		t.Errorf("batch_timeout=%v", c.Kafka.BatchTimeout)
+	}
+	if c.Kafka.WriteTimeout != 2*time.Second {
+		t.Errorf("kafka_write_timeout=%v", c.Kafka.WriteTimeout)
 	}
 	if c.Fallback.DataDir != "/data/logtrack" {
 		t.Errorf("data_dir=%q", c.Fallback.DataDir)
 	}
-	if c.Shutdown.Timeout != 10*time.Second {
+	if c.Shutdown.Timeout != 5*time.Second {
 		t.Errorf("shutdown_timeout=%v", c.Shutdown.Timeout)
 	}
-	if c.Server.MetricsAddress != ":9090" {
+	if c.Server.MetricsAddress != ":9584" {
 		t.Errorf("metrics_address=%q", c.Server.MetricsAddress)
 	}
 }
@@ -63,10 +66,10 @@ func TestLoad_InvalidEnvFallsBackToDefault(t *testing.T) {
 	t.Setenv("LOG_TRACK_SERVER_QUEUE_SIZE", "not-a-number")
 	t.Setenv("LOG_TRACK_KAFKA_BATCH_TIMEOUT", "not-a-duration")
 	c := Load()
-	if c.Server.QueueSize != 50000 {
+	if c.Server.QueueSize != 1000 {
 		t.Errorf("invalid int should fall back, got %d", c.Server.QueueSize)
 	}
-	if c.Kafka.BatchTimeout != 5*time.Second {
+	if c.Kafka.BatchTimeout != 500*time.Millisecond {
 		t.Errorf("invalid duration should fall back, got %v", c.Kafka.BatchTimeout)
 	}
 }
