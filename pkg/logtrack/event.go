@@ -28,7 +28,7 @@ func EventTrack(e *Event, opts ...Option) {
 	}
 	o := applyOpts(opts)
 	if c := client(); c != nil {
-		c.send(envelope.TopicEventTracks, e, o.traceID)
+		c.send(envelope.TopicEventTracks, e, o.traceID, o.partitionKey)
 	}
 }
 
@@ -41,7 +41,10 @@ func EventCtx(ctx context.Context, e *Event, opts ...Option) {
 	if o.traceID == "" {
 		o.traceID = traceIDFromCtx(ctx)
 	}
+	if o.partitionKey == "" {
+		o.partitionKey = partitionKeyFromCtx(ctx)
+	}
 	if c := client(); c != nil {
-		c.send(envelope.TopicEventTracks, e, o.traceID)
+		c.send(envelope.TopicEventTracks, e, o.traceID, o.partitionKey)
 	}
 }

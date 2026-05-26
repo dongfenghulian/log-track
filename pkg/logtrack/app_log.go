@@ -27,7 +27,7 @@ func App(l *AppLog, opts ...Option) {
 	}
 	o := applyOpts(opts)
 	if c := client(); c != nil {
-		c.send(envelope.TopicAppLogs, l, o.traceID)
+		c.send(envelope.TopicAppLogs, l, o.traceID, o.partitionKey)
 	}
 }
 
@@ -40,7 +40,10 @@ func AppCtx(ctx context.Context, l *AppLog, opts ...Option) {
 	if o.traceID == "" {
 		o.traceID = traceIDFromCtx(ctx)
 	}
+	if o.partitionKey == "" {
+		o.partitionKey = partitionKeyFromCtx(ctx)
+	}
 	if c := client(); c != nil {
-		c.send(envelope.TopicAppLogs, l, o.traceID)
+		c.send(envelope.TopicAppLogs, l, o.traceID, o.partitionKey)
 	}
 }

@@ -33,19 +33,21 @@
   "host": "pod-xxx",
   "timestamp": 1704067200000,
   "trace_id": "abc-123-def",
+  "partition_key": "user-789",
   "data": { ... }
 }
 ```
 
-| 字段      | 类型   | 必填 | 说明                                                        |
-| --------- | ------ | ---- | ----------------------------------------------------------- |
-| version   | string | 是   | 协议版本号                                                  |
-| topic     | string | 是   | 目标 Kafka topic 名，命中内置 handler 时走 handler 处理逻辑 |
-| service   | string | 是   | 后端服务名（进程标识）                                      |
-| host      | string | 是   | 来源主机名/Pod 名                                           |
-| timestamp | int64  | 是   | 毫秒级时间戳                                                |
-| trace_id  | string | 否   | 链路追踪 ID                                                 |
-| data      | object | 是   | 具体业务数据                                                |
+| 字段          | 类型   | 必填 | 说明                                                                       |
+| ------------- | ------ | ---- | -------------------------------------------------------------------------- |
+| version       | string | 是   | 协议版本号                                                                 |
+| topic         | string | 是   | 目标 Kafka topic 名，命中内置 handler 时走 handler 处理逻辑                |
+| service       | string | 是   | 后端服务名（进程标识）                                                     |
+| host          | string | 是   | 来源主机名/Pod 名                                                          |
+| timestamp     | int64  | 是   | 毫秒级时间戳                                                               |
+| trace_id      | string | 否   | 链路追踪 ID                                                                |
+| partition_key | string | 否   | Kafka 分区 key；未提供时 Gateway 回退到 trace_id；都没有则消息均匀分布   |
+| data          | object | 是   | 具体业务数据                                                               |
 
 `app_id`、`country` 等业务身份字段不在信封内，由各 topic 的 data 自行定义（见 §三）。
 

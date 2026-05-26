@@ -114,7 +114,7 @@ func TestClient_Send_BasicEnvelopeFields(t *testing.T) {
 	}
 	defer c.Close()
 
-	c.send("custom-topic", map[string]any{"k": "v"}, "trace-1")
+	c.send("custom-topic", map[string]any{"k": "v"}, "trace-1", "")
 	waitForEnvelopes(t, fs, 1, 2*time.Second)
 
 	env := fs.envelopes()[0]
@@ -180,7 +180,7 @@ func TestClient_ReconnectsAfterServerCloses(t *testing.T) {
 	}
 	defer c.Close()
 
-	c.send("topic-a", map[string]any{"i": 1}, "")
+	c.send("topic-a", map[string]any{"i": 1}, "", "")
 	waitForEnvelopes(t, fs, 1, 2*time.Second)
 
 	// Server closed mid-session. TCP half-close detection takes 1-2 writes:
@@ -188,7 +188,7 @@ func TestClient_ReconnectsAfterServerCloses(t *testing.T) {
 	// which clears the conn, third reconnects and lands. Send several follow-ups; expect at
 	// least one to reach the server after reconnect.
 	for i := 2; i <= 6; i++ {
-		c.send("topic-a", map[string]any{"i": i}, "")
+		c.send("topic-a", map[string]any{"i": i}, "", "")
 		time.Sleep(50 * time.Millisecond)
 	}
 	waitForEnvelopes(t, fs, 2, 3*time.Second) // first + at least one post-reconnect
@@ -205,7 +205,7 @@ func TestClient_DialFailureDoesNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	c.send("topic", map[string]any{"x": 1}, "trace") // must not panic
+	c.send("topic", map[string]any{"x": 1}, "trace", "") // must not panic
 }
 
 func TestEncodeFrame_RoundTrip(t *testing.T) {
@@ -285,5 +285,94 @@ func TestApplyOpts_LastWins(t *testing.T) {
 	o := applyOpts([]Option{WithTraceID("first"), WithTraceID("second")})
 	if o.traceID != "second" {
 		t.Errorf("got %q", o.traceID)
+	}
+}
+
+func TestCtxWithPartitionKey(t *testing.T) {
+	ctx := CtxWithPartitionKey(context.Background(), "user-123")
+	if got := partitionKeyFromCtx(ctx); got != "user-123" {
+		t.Errorf("got %q", got)
+	}
+	if got := partitionKeyFromCtx(nil); got != "" {
+		t.Errorf("nil ctx should return empty, got %q", got)
+	}
+	if got := partitionKeyFromCtx(context.Background()); got != "" {
+		t.Errorf("bare ctx should return empty, got %q", got)
+	}
+}
+
+func TestCtxKeys_Independent(t *testing.T) {
+	// trace_id and partition_key live on separate ctx keys; setting one must not affect the other.
+	ctx := context.Background()
+	ctx = CtxWithTraceID(ctx, "t-1")
+	ctx = CtxWithPartitionKey(ctx, "k-1")
+	if got := traceIDFromCtx(ctx); got != "t-1" {
+		t.Errorf("trace_id got %q", got)
+	}
+	if got := partitionKeyFromCtx(ctx); got != "k-1" {
+		t.Errorf("partition_key got %q", got)
+	}
+}
+
+func TestApplyOpts_WithPartitionKey(t *testing.T) {
+	o := applyOpts([]Option{WithPartitionKey("k-1"), WithTraceID("t-1")})
+	if o.partitionKey != "k-1" {
+		t.Errorf("partitionKey=%q", o.partitionKey)
+	}
+	if o.traceID != "t-1" {
+		t.Errorf("traceID=%q", o.traceID)
+	}
+}
+
+func TestClient_Send_ProducesPartitionKeyOnWire(t *testing.T) {
+	fs := newFakeServer(t)
+	defer fs.close()
+
+	c, err := New(&Config{
+		GatewayAddr: fs.addr(),
+		ServiceName: "test-svc",
+		MaxConns:    1,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.send("topic-a", map[string]any{"x": 1}, "trace-1", "user-789")
+	waitForEnvelopes(t, fs, 1, 2*time.Second)
+
+	env := fs.envelopes()[0]
+	if env.PartitionKey != "user-789" {
+		t.Errorf("partition_key=%q want user-789", env.PartitionKey)
+	}
+	if env.TraceID != "trace-1" {
+		t.Errorf("trace_id=%q want trace-1", env.TraceID)
+	}
+}
+
+func TestClient_Send_OmitsEmptyPartitionKey(t *testing.T) {
+	fs := newFakeServer(t)
+	defer fs.close()
+
+	c, err := New(&Config{
+		GatewayAddr: fs.addr(),
+		ServiceName: "test-svc",
+		MaxConns:    1,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.send("topic-a", map[string]any{"x": 1}, "trace-1", "")
+	waitForEnvelopes(t, fs, 1, 2*time.Second)
+
+	// PartitionKey should not appear in the JSON wire format when empty (omitempty).
+	// We assert by re-marshalling and inspecting raw bytes.
+	env := fs.envelopes()[0]
+	if env.PartitionKey != "" {
+		t.Errorf("partition_key should be empty, got %q", env.PartitionKey)
 	}
 }

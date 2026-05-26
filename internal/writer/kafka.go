@@ -76,8 +76,8 @@ func (k *KafkaWriter) Write(env *envelope.Envelope) error {
 	ctx, cancel := context.WithTimeout(context.Background(), k.writeTimeout)
 	defer cancel()
 	msg := kafka.Message{Value: body}
-	if env.TraceID != "" {
-		msg.Key = []byte(env.TraceID)
+	if key := selectPartitionKey(env); key != "" {
+		msg.Key = []byte(key)
 	}
 	start := time.Now()
 	err = w.WriteMessages(ctx, msg)
@@ -116,6 +116,15 @@ func (k *KafkaWriter) Close() error {
 	}
 	k.writers = nil
 	return firstErr
+}
+
+// selectPartitionKey picks the Kafka message key in priority order:
+// explicit PartitionKey > TraceID > none. Returning "" lets the Hash balancer pick a partition randomly.
+func selectPartitionKey(env *envelope.Envelope) string {
+	if env.PartitionKey != "" {
+		return env.PartitionKey
+	}
+	return env.TraceID
 }
 
 // Probe verifies that at least one broker is reachable by establishing a TCP control connection

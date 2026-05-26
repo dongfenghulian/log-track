@@ -16,11 +16,12 @@ const (
 
 // Envelope is the unified message wrapper. See PROTOCOL.md §1.2.
 type Envelope struct {
-	Version   string          `json:"version"`
-	Topic     string          `json:"topic"`
-	Service   string          `json:"service"`
-	Host      string          `json:"host"`
-	Timestamp int64           `json:"timestamp"`
-	TraceID   string          `json:"trace_id,omitempty"`
-	Data      json.RawMessage `json:"data"`
+	Version      string          `json:"version"`
+	Topic        string          `json:"topic"`
+	Service      string          `json:"service"`
+	Host         string          `json:"host"`
+	Timestamp    int64           `json:"timestamp"`
+	TraceID      string          `json:"trace_id,omitempty"`
+	PartitionKey string          `json:"partition_key,omitempty"`
+	Data         json.RawMessage `json:"data"`
 }

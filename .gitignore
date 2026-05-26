@@ -2,3 +2,22 @@
 .vs
 server
 server.exe
+
+# Built binaries
+/main
+/gateway
+/cmd/gateway/gateway
+*.exe
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Local development
+/data/
+*.log
+
+# Editor
+*.swp
+.DS_Store

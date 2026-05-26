@@ -29,7 +29,7 @@ func RPC(l *RPCLog, opts ...Option) {
 	}
 	o := applyOpts(opts)
 	if c := client(); c != nil {
-		c.send(envelope.TopicRPCCalls, l, o.traceID)
+		c.send(envelope.TopicRPCCalls, l, o.traceID, o.partitionKey)
 	}
 }
 
@@ -42,7 +42,10 @@ func RPCCtx(ctx context.Context, l *RPCLog, opts ...Option) {
 	if o.traceID == "" {
 		o.traceID = traceIDFromCtx(ctx)
 	}
+	if o.partitionKey == "" {
+		o.partitionKey = partitionKeyFromCtx(ctx)
+	}
 	if c := client(); c != nil {
-		c.send(envelope.TopicRPCCalls, l, o.traceID)
+		c.send(envelope.TopicRPCCalls, l, o.traceID, o.partitionKey)
 	}
 }

@@ -53,7 +53,7 @@ func InboundHTTP(l *InboundHTTPLog, opts ...Option) {
 	truncateInbound(l, httpBodySizeLimit())
 	o := applyOpts(opts)
 	if c := client(); c != nil {
-		c.send(envelope.TopicInboundHTTPLogs, l, o.traceID)
+		c.send(envelope.TopicInboundHTTPLogs, l, o.traceID, o.partitionKey)
 	}
 }
 
@@ -67,8 +67,11 @@ func InboundHTTPCtx(ctx context.Context, l *InboundHTTPLog, opts ...Option) {
 	if o.traceID == "" {
 		o.traceID = traceIDFromCtx(ctx)
 	}
+	if o.partitionKey == "" {
+		o.partitionKey = partitionKeyFromCtx(ctx)
+	}
 	if c := client(); c != nil {
-		c.send(envelope.TopicInboundHTTPLogs, l, o.traceID)
+		c.send(envelope.TopicInboundHTTPLogs, l, o.traceID, o.partitionKey)
 	}
 }
 
@@ -101,7 +104,7 @@ func OutboundHTTP(l *OutboundHTTPLog, opts ...Option) {
 	truncateOutbound(l, httpBodySizeLimit())
 	o := applyOpts(opts)
 	if c := client(); c != nil {
-		c.send(envelope.TopicOutboundHTTPLogs, l, o.traceID)
+		c.send(envelope.TopicOutboundHTTPLogs, l, o.traceID, o.partitionKey)
 	}
 }
 
@@ -115,8 +118,11 @@ func OutboundHTTPCtx(ctx context.Context, l *OutboundHTTPLog, opts ...Option) {
 	if o.traceID == "" {
 		o.traceID = traceIDFromCtx(ctx)
 	}
+	if o.partitionKey == "" {
+		o.partitionKey = partitionKeyFromCtx(ctx)
+	}
 	if c := client(); c != nil {
-		c.send(envelope.TopicOutboundHTTPLogs, l, o.traceID)
+		c.send(envelope.TopicOutboundHTTPLogs, l, o.traceID, o.partitionKey)
 	}
 }
 

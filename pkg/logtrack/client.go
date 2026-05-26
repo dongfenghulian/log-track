@@ -162,7 +162,7 @@ func (c *Client) shardIndex(traceID string) int {
 }
 
 // send is the single entry point all helpers funnel into.
-func (c *Client) send(topic string, data any, traceID string) {
+func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		c.logger.Error("logtrack: serialize failed",
@@ -174,13 +174,14 @@ func (c *Client) send(topic string, data any, traceID string) {
 		return
 	}
 	env := envelope.Envelope{
-		Version:   envelope.Version,
-		Topic:     topic,
-		Service:   c.service,
-		Host:      c.host,
-		Timestamp: time.Now().UnixMilli(),
-		TraceID:   traceID,
-		Data:      payload,
+		Version:      envelope.Version,
+		Topic:        topic,
+		Service:      c.service,
+		Host:         c.host,
+		Timestamp:    time.Now().UnixMilli(),
+		TraceID:      traceID,
+		PartitionKey: partitionKey,
+		Data:         payload,
 	}
 	frame, err := encodeFrame(&env)
 	if err != nil {

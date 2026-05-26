@@ -282,15 +282,55 @@ logtrack.Send("custom-business-events", map[string]any{
 
 ---
 
-## 五、ctx 模式
+## 五、Kafka 分区 key
 
-如果你的项目把 `trace_id` 注入了 ctx，用 `XxxCtx` 系列 helper 自动取出来：
+每条消息进入 Kafka 时会带一个 partition key（通过 `Hash` balancer 路由到 partition）。SDK 的取值优先级：
+
+1. **`WithPartitionKey(key)` option（最高优先级）**——业务方显式指定
+2. **`WithTraceID(traceID)` option**——未指定 partition key 时回退
+3. **空**——`Hash` balancer 随机/轮询分配
+
+例：让同一用户的所有事件落在同一个 partition（消费时保证按时间顺序）：
+
+```go
+logtrack.EventTrack(&logtrack.Event{
+    Name:       "loan.apply_submitted",
+    UserID:     789,
+    Platform:   "android",
+    AppVersion: "3.14.2",
+    BID:        "mx01",
+}, logtrack.WithPartitionKey("user-789"), logtrack.WithTraceID(traceID))
+```
+
+例：自定义 topic 按业务 id 分区：
+
+```go
+logtrack.Send("order-events", data,
+    logtrack.WithPartitionKey("order-"+orderID),
+    logtrack.WithTraceID(traceID))
+```
+
+ctx 形式同样支持：
+
+```go
+ctx = logtrack.CtxWithPartitionKey(ctx, "user-789")
+ctx = logtrack.CtxWithTraceID(ctx, traceID)
+
+logtrack.EventCtx(ctx, &logtrack.Event{...})
+```
+
+---
+
+## 六、ctx 模式
+
+如果你的项目把 `trace_id` / partition key 注入了 ctx，用 `XxxCtx` 系列 helper 自动取出来：
 
 ```go
 // 在请求入口（middleware）注入
 ctx = logtrack.CtxWithTraceID(ctx, traceID)
+ctx = logtrack.CtxWithPartitionKey(ctx, "user-789") // 可选
 
-// 后续调用自动从 ctx 拿 trace_id
+// 后续调用自动从 ctx 拿 trace_id 和 partition key
 logtrack.SendCtx(ctx, "custom-topic", data)
 logtrack.InboundHTTPCtx(ctx, &logtrack.InboundHTTPLog{...})
 logtrack.OutboundHTTPCtx(ctx, &logtrack.OutboundHTTPLog{...})
@@ -303,7 +343,7 @@ logtrack.AppCtx(ctx, &logtrack.AppLog{...})
 
 ---
 
-## 六、发送失败处理
+## 七、发送失败处理
 
 SDK **不依赖 ACK，不重试**。任何失败都通过 `Config.Logger`（默认 `slog.Default()`）记录到本地日志，**不会阻塞业务**。
 
@@ -320,7 +360,7 @@ SDK **不依赖 ACK，不重试**。任何失败都通过 `Config.Logger`（默�
 
 ---
 
-## 七、连接模型与并发
+## 八、连接模型与并发
 
 - 默认 4 条 TCP 长连接，按 `trace_id` FNV 哈希分槽
 - 同一 `trace_id` → 固定走同一条连接（保证同 trace 在 Kafka 单 partition 内顺序）
@@ -333,7 +373,7 @@ SDK **不依赖 ACK，不重试**。任何失败都通过 `Config.Logger`（默�
 
 ---
 
-## 八、性能特征
+## 九、性能特征
 
 - 每次调用阻塞约 = 序列化时间 + TCP 写入时间，典型 < 1ms
 - 单连接吞吐约 5k-20k QPS（消息小、本地网络）
@@ -347,7 +387,7 @@ SDK **不依赖 ACK，不重试**。任何失败都通过 `Config.Logger`（默�
 
 ---
 
-## 九、停机
+## 十、停机
 
 业务进程退出前调一次 `logtrack.Close()`。它关闭所有 shard 连接。
 
@@ -359,7 +399,7 @@ SDK 没有"排空队列"的概念（因为不缓冲）。`Close` 之后再调用
 
 ---
 
-## 十、完整示例
+## 十一、完整示例
 
 ```go
 package main
@@ -455,7 +495,7 @@ func trackInbound(next http.Handler) http.Handler {
 
 ---
 
-## 十一、FAQ
+## 十二、FAQ
 
 **Q: SDK 会拉哪些第三方依赖？**
 A: 零。SDK 只用 Go 标准库。`go.mod` 没有任何 `require` 行。

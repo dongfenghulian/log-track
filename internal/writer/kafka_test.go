@@ -5,7 +5,32 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/dongfenghulian/log-track/pkg/logtrack/envelope"
 )
+
+func TestSelectPartitionKey_Precedence(t *testing.T) {
+	cases := []struct {
+		name        string
+		partKey     string
+		traceID     string
+		want        string
+	}{
+		{"explicit wins over trace", "explicit", "trace-x", "explicit"},
+		{"trace fallback when partition empty", "", "trace-x", "trace-x"},
+		{"both empty returns empty", "", "", ""},
+		{"partition with empty trace", "explicit", "", "explicit"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := &envelope.Envelope{PartitionKey: tc.partKey, TraceID: tc.traceID}
+			if got := selectPartitionKey(env); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestKafkaProbe_NoBrokersReturnsError(t *testing.T) {
 	kw := NewKafkaWriter(nil, 1, time.Millisecond, 200*time.Millisecond)
