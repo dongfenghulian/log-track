@@ -425,3 +425,7 @@ logtrack.Error("failed to query database", // → topic=app-logs
 | 消息量突增       | Gateway 过载     | 连接数限制 + 监控告警         |
 
 ---
+
+## 九、License
+
+本项目采用 [MIT License](./LICENSE)。
