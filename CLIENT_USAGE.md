@@ -246,7 +246,7 @@ logtrack.App(&logtrack.AppLog{
     AppID:    123,
     Country:  "id",
     BID:      "mx01",
-    Level:    "ERROR",       // DEBUG/INFO/WARN/ERROR
+    Level:    "ERROR",       // DEBUG/INFO/WARN/ERROR，必须是这 4 个之一
     Message:  "failed to disburse loan",
     File:     "loan/service.go",
     Line:     88,
@@ -259,6 +259,11 @@ logtrack.App(&logtrack.AppLog{
     },
 }, logtrack.WithTraceID(traceID))
 ```
+
+> **按 level 自动分流**：客户端调用方式不变；gateway 端会根据 `Level` 把消息写入不同 Kafka topic：
+> `ERROR` → `app-logs-error`，`WARN` → `app-logs-warn`，`INFO` → `app-logs-info`，`DEBUG` → `app-logs-debug`。
+> 未知 level 会被拒绝丢弃。
+> 业务方需提前在 Kafka 创建好这 4 个 topic（auto-create 开启的话会自动建）。
 
 ---
 

@@ -124,7 +124,7 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 | **Outbound HTTP Handler** | 校验 outbound HTTP 日志格式（topic=outbound-http-logs，后端→三方）    |
 | **Event Handler**         | 校验事件埋点（topic=event-tracks）                                    |
 | **RPC Handler**           | 校验 RPC 日志，识别慢调用/错误（topic=rpc-calls）                     |
-| **App Handler**           | 按日志级别分流处理（topic=app-logs）                                  |
+| **App Handler**           | 按日志级别分流处理（topic=app-logs，按 level 落 4 个不同 Kafka topic） |
 | **Passthrough Handler**   | 未命中已注册 handler 时使用，不做校验，整封写入对应 topic             |
 | **Writer Manager**        | 管理写入 Kafka 和降级文件                                             |
 | **Kafka Writer**          | 批量异步写入 Kafka                                                    |
@@ -157,7 +157,12 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 | `outbound-http-logs` | Outbound HTTP Handler | 按 provider hash | 7 天     |
 | `event-tracks`       | Event Handler         | 按 user_id hash  | 30 天    |
 | `rpc-calls`          | RPC Handler           | 按 method hash   | 7 天     |
-| `app-logs`           | App Handler           | 按 service hash  | 15 天    |
+| `app-logs-error`     | App Handler           | 按 service hash  | 7 天     |
+| `app-logs-warn`      | App Handler           | 按 service hash  | 7 天     |
+| `app-logs-info`      | App Handler           | 按 service hash  | 7 天     |
+| `app-logs-debug`     | App Handler           | 按 service hash  | 7 天     |
+
+**应用日志按 level 分流**：SDK 始终发 `topic=app-logs` 信封，gateway 根据 `data.level` 改写 `env.Topic` 为 `app-logs-error` / `app-logs-warn` / `app-logs-info` / `app-logs-debug` 之一再写入 Kafka。未知 level 直接拒绝（不写入任何 topic）。`app-logs` 本身**不是 Kafka topic**，业务方无需在 Kafka 创建。
 
 **自定义 topic**：客户端可发送任意 `topic` 值，未命中内置 handler 的消息走 Passthrough Handler，整封 JSON 写入名为该 topic 的 Kafka topic。业务方需提前在 Kafka 创建 topic（含分区/保留时间等配置），LogTrack 不会自动建 topic；topic 不存在时按 Kafka 写入失败处理，触发降级到 fallback 文件。
 
@@ -321,7 +326,7 @@ logtrack.RPC(&RPCLog{     // → topic=rpc-calls
     DurationMs: 45,
 })
 
-logtrack.Error("failed to query database", // → topic=app-logs
+logtrack.Error("failed to query database", // → SDK 发 topic=app-logs，gateway 按 level 落 app-logs-error
     logtrack.String("user_id", "123"),
     logtrack.String("sql", "SELECT ..."),
 )

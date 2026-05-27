@@ -57,7 +57,7 @@
 
 ### 1.4 Topic 路由
 
-- 命中内置 handler（topic 为 `inbound-http-logs / outbound-http-logs / event-tracks / rpc-calls / app-logs`）：走 handler 校验后写入对应 topic
+- 命中内置 handler（topic 为 `inbound-http-logs / outbound-http-logs / event-tracks / rpc-calls / app-logs`）：走 handler 校验后写入对应 Kafka topic（注意 `app-logs` 不是 Kafka topic，handler 会按 level 改写为 `app-logs-error / app-logs-warn / app-logs-info / app-logs-debug` 之一）
 - 未命中：将完整信封 JSON 直接写入名为 `topic` 字段值的 Kafka topic，由业务方自行确保该 topic 已在 Kafka 创建
 
 ---
@@ -419,6 +419,17 @@ logtrack.EventCtx(ctx, &Event{...})
 ### 3.5 app-logs（应用日志）
 
 **用途**：业务 Debug、错误追踪。
+
+**Topic 路由**：业务方 SDK 始终发 `topic="app-logs"` 信封；gateway 端 handler 根据 `level` 字段把消息分流到 4 个 Kafka topic：
+
+| level   | 实际写入的 Kafka topic |
+| ------- | ---------------------- |
+| `ERROR` | `app-logs-error`       |
+| `WARN`  | `app-logs-warn`        |
+| `INFO`  | `app-logs-info`        |
+| `DEBUG` | `app-logs-debug`       |
+
+未知 level（小写、`TRACE`、`FATAL` 等）直接拒绝，不写入任何 topic。
 
 **data 结构**：
 

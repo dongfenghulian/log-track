@@ -11,7 +11,16 @@ const (
 	TopicOutboundHTTPLogs = "outbound-http-logs"
 	TopicEventTracks      = "event-tracks"
 	TopicRPCCalls         = "rpc-calls"
-	TopicAppLogs          = "app-logs"
+
+	// TopicAppLogs is the SDK-side topic name; the gateway accepts envelopes with this topic
+	// and rewrites env.Topic to one of the per-level topics below before writing to Kafka.
+	TopicAppLogs = "app-logs"
+
+	// Per-level Kafka topics for application logs. The gateway writes to these; the SDK does not.
+	TopicAppLogsError = "app-logs-error"
+	TopicAppLogsWarn  = "app-logs-warn"
+	TopicAppLogsInfo  = "app-logs-info"
+	TopicAppLogsDebug = "app-logs-debug"
 )
 
 // Envelope is the unified message wrapper. See PROTOCOL.md §1.2.

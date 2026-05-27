@@ -258,6 +258,6 @@ logtrack.InboundHTTP(&logtrack.InboundHTTPLog{
 ## 七、命名约定
 
 - 包名：全小写、单词、不带下划线（标准 Go 风格）。例外：`inbound_http` / `outbound_http` / `app_log` 因为单词组合需要分隔，可保留下划线（包名只用于 import 路径，不是标识符）。
-- topic 常量：`envelope.TopicInboundHTTPLogs / TopicOutboundHTTPLogs / TopicEventTracks / TopicRPCCalls / TopicAppLogs`，值与 PROTOCOL.md 一致（`inbound-http-logs` 等）。
+- topic 常量：`envelope.TopicInboundHTTPLogs / TopicOutboundHTTPLogs / TopicEventTracks / TopicRPCCalls / TopicAppLogs`，值与 PROTOCOL.md 一致（`inbound-http-logs` 等）。`TopicAppLogs` 是 SDK 发送时的逻辑 topic，gateway 内部按 level 分流为 `TopicAppLogsError / TopicAppLogsWarn / TopicAppLogsInfo / TopicAppLogsDebug` 之一写入 Kafka。
 - 环境变量：`LOG_TRACK_<DOMAIN>_<NAME>`（全大写、下划线分隔）。
 - 公开 struct：与 PROTOCOL.md 字段名 PascalCase 化（`AppID / DurationMs / RequestBody`）；JSON tag 用文档中的 snake_case。
