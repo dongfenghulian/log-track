@@ -3,6 +3,9 @@
 server
 server.exe
 
+log-track
+log-track.exe
+
 # Built binaries
 /main
 /gateway
