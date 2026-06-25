@@ -3,6 +3,7 @@
 server
 server.exe
 
+bin/
 log-track
 log-track.exe
 
