@@ -1,16 +1,9 @@
 .idea
 .vs
-server
-server.exe
 
 bin/
-log-track
-log-track.exe
 
 # Built binaries
-/main
-/gateway
-/cmd/gateway/gateway
 *.exe
 
 # Go
