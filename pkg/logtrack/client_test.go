@@ -133,6 +133,16 @@ func TestClient_Send_BasicEnvelopeFields(t *testing.T) {
 	if env.Timestamp == 0 {
 		t.Errorf("timestamp not set")
 	}
+	if env.TimestampAt == "" {
+		t.Errorf("timestamp_at not set")
+	} else {
+		parsed, err := time.Parse(time.RFC3339Nano, env.TimestampAt)
+		if err != nil {
+			t.Errorf("timestamp_at is not RFC3339: %q", env.TimestampAt)
+		} else if _, offset := parsed.Zone(); offset != 8*60*60 {
+			t.Errorf("timestamp_at offset=%d, want +08:00", offset)
+		}
+	}
 	host, _ := os.Hostname()
 	if env.Host != host {
 		t.Errorf("host=%q want %q", env.Host, host)

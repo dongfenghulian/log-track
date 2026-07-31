@@ -230,7 +230,7 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 
 每次记录日志的执行路径：
 
-1. 构造统一信封（见 PROTOCOL.md §1.2），自动注入 `service / host / timestamp / trace_id`
+1. 构造统一信封（见 PROTOCOL.md §1.2），自动注入 `service / host / timestamp / timestamp_at / trace_id`
 2. 序列化为 JSON
 3. 选 shard：`idx = hash(trace_id) % max_conns`；`trace_id` 为空时 `idx=0`
 4. 拿该 shard 的 mutex（串行化建连与写帧）

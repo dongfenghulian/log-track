@@ -106,6 +106,7 @@ func (f *FallbackWriter) Write(env *envelope.Envelope) error {
 			return err
 		}
 	}
+	env.EnsureTimestampAt()
 	body, err := json.Marshal(env)
 	if err != nil {
 		return err

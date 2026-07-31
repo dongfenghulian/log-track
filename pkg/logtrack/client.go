@@ -173,12 +173,14 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 			"err", err)
 		return
 	}
+	now := time.Now()
 	env := envelope.Envelope{
 		Version:      envelope.Version,
 		Topic:        topic,
 		Service:      c.service,
 		Host:         c.host,
-		Timestamp:    time.Now().UnixMilli(),
+		Timestamp:    now.UnixMilli(),
+		TimestampAt:  envelope.TimestampAtFromTime(now),
 		TraceID:      traceID,
 		PartitionKey: partitionKey,
 		Data:         payload,

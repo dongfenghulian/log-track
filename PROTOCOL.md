@@ -32,6 +32,7 @@
   "service": "loan-backend",
   "host": "pod-xxx",
   "timestamp": 1704067200000,
+  "timestamp_at": "2024-01-01T08:00:00+08:00",
   "trace_id": "abc-123-def",
   "partition_key": "user-789",
   "data": { ... }
@@ -45,6 +46,7 @@
 | service       | string | 是   | 后端服务名（进程标识）                                                     |
 | host          | string | 是   | 来源主机名/Pod 名                                                          |
 | timestamp     | int64  | 是   | 毫秒级时间戳                                                               |
+| timestamp_at  | string | 否   | RFC3339 时间字符串，固定使用 `+08:00` 时区；新 SDK 自动注入，Gateway 会按 timestamp 为旧 SDK 补齐 |
 | trace_id      | string | 否   | 链路追踪 ID                                                                |
 | partition_key | string | 否   | Kafka 分区 key；未提供时 Gateway 回退到 trace_id；都没有则消息均匀分布   |
 | data          | object | 是   | 具体业务数据                                                               |
@@ -73,6 +75,7 @@ SDK 只为信封字段提供注入工具，业务字段（`app_id` / `country` /
 | service   | `Init` 时 `Config.ServiceName` 配置一次 |
 | host      | SDK 自动从系统读取                      |
 | timestamp | SDK 调用时自动取当前毫秒                |
+| timestamp_at | SDK 调用时自动取当前时间并格式化为 `+08:00` RFC3339 字符串 |
 | version   | SDK 固定 `1.0`                          |
 | topic     | helper 内部固定 / `Send` 第一参数       |
 | trace_id  | 通过 `WithTraceID` option 或 ctx 注入   |
@@ -475,4 +478,3 @@ logtrack.EventCtx(ctx, &Event{...})
 | DEBUG | 按需开启（如调试时）                   |
 
 ---
-
