@@ -202,6 +202,42 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 
 客户端为同步直发，无队列与缓冲，业务进程退出即结束，无独立停机流程。
 
+### 4.6 临时 HTTP 写入口
+
+用于测试时直接把 body 原样写入 Kafka topic，不包裹 envelope，不做业务校验。
+
+启动：
+
+```bash
+go run ./cmd/http-api
+```
+
+默认监听端口：`:9591`
+
+接口：
+
+```bash
+POST /http-api?topic=event-tracks
+Content-Type: application/json
+
+{"bid":"mx01","event_name":"loan.apply_submitted","platform":"android","app_version":"1.0"}
+```
+
+说明：
+
+- `topic` 必填
+- 请求体会按原样写入对应 Kafka topic
+- Kafka 配置共用现有 `LOG_TRACK_KAFKA_*`
+- 监听地址可用 `-addr` 覆盖，默认值 `:9591`
+
+示例：
+
+```bash
+curl -X POST 'http://127.0.0.1:9591/http-api?topic=event-tracks' \
+  -H 'Content-Type: application/json' \
+  -d '{"bid":"mx01","event_name":"loan.apply_submitted","platform":"android","app_version":"1.0"}'
+```
+
 ---
 
 ## 五、客户端 SDK 设计

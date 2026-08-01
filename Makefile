@@ -16,7 +16,9 @@ PKG          := github.com/dongfenghulian/log-track
 PROJECT_NAME ?= log-track
 APP_NAME     ?= $(PROJECT_NAME)
 CMD          := ./cmd/server
+HTTP_CMD     := ./cmd/http-api
 BINARY       := bin/$(PROJECT_NAME)
+HTTP_BINARY  := bin/$(PROJECT_NAME)-http-api
 VERSION     ?= dev
 INSTALL_DIR  ?= /usr/local/go-server/$(APP_NAME)
 INSTALL_PATH ?= $(INSTALL_DIR)/$(APP_NAME)
@@ -39,7 +41,7 @@ LDFLAGS := \
 	-X '$(VERSION_PKG).GitMsg=$(GIT_MSG)' \
 	-X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'
 
-.PHONY: build run install backoff clean version
+.PHONY: build run build-http run-http install backoff clean version
 
 build:
 	@echo "==> building $(BINARY)  project=$(PROJECT_NAME) version=$(VERSION) commit=$(GIT_COMMIT) date=$(BUILD_DATE)"
@@ -49,6 +51,15 @@ build:
 run:
 	@echo "==> running $(CMD)  project=$(PROJECT_NAME) version=$(VERSION) commit=$(GIT_COMMIT) date=$(BUILD_DATE)"
 	go run -ldflags "$(LDFLAGS)" $(CMD) $(ARGS)
+
+build-http:
+	@echo "==> building $(HTTP_BINARY)  project=$(PROJECT_NAME) version=$(VERSION) commit=$(GIT_COMMIT) date=$(BUILD_DATE)"
+	@mkdir -p $(dir $(HTTP_BINARY))
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(HTTP_BINARY) $(HTTP_CMD)
+
+run-http:
+	@echo "==> running $(HTTP_CMD)  project=$(PROJECT_NAME) version=$(VERSION) commit=$(GIT_COMMIT) date=$(BUILD_DATE)"
+	go run -ldflags "$(LDFLAGS)" $(HTTP_CMD) $(ARGS)
 
 install:
 	@printf "Install to $(INSTALL_PATH) and restart supervisor program $(SUPERVISOR_PROGRAM)? [y/N] "; \
