@@ -31,6 +31,7 @@ const (
 	defaultMaxConns       = 4
 	defaultConnectTimeout = 3 * time.Second
 	defaultWriteTimeout   = 1 * time.Second
+	defaultFailureBackoff = 5 * time.Second
 )
 
 // Config is supplied at Init time. Only GatewayAddr and ServiceName are required.
@@ -40,6 +41,7 @@ type Config struct {
 	MaxConns       int           // 1..4, defaults to 4
 	ConnectTimeout time.Duration // defaults to 3s
 	WriteTimeout   time.Duration // defaults to 1s
+	FailureBackoff time.Duration // defaults to 5s; <=0 uses default
 	Logger         *slog.Logger  // defaults to slog.Default()
 }
 
@@ -50,6 +52,7 @@ type Client struct {
 	host           string
 	connectTimeout time.Duration
 	writeTimeout   time.Duration
+	failureBackoff time.Duration
 	logger         *slog.Logger
 	shards         []*shardConn
 	closed         bool
@@ -57,8 +60,9 @@ type Client struct {
 }
 
 type shardConn struct {
-	mu   sync.Mutex
-	conn net.Conn
+	mu          sync.Mutex
+	conn        net.Conn
+	nextAttempt time.Time
 }
 
 var (
@@ -125,6 +129,10 @@ func New(cfg *Config) (*Client, error) {
 	if writeTO <= 0 {
 		writeTO = defaultWriteTimeout
 	}
+	failureBackoff := cfg.FailureBackoff
+	if failureBackoff <= 0 {
+		failureBackoff = defaultFailureBackoff
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -141,6 +149,7 @@ func New(cfg *Config) (*Client, error) {
 		host:           host,
 		connectTimeout: connectTO,
 		writeTimeout:   writeTO,
+		failureBackoff: failureBackoff,
 		logger:         logger,
 		shards:         shards,
 	}, nil
@@ -218,6 +227,19 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now = time.Now()
+	backoffEnabled := topic != envelope.TopicEventTracks
+	if backoffEnabled && now.Before(s.nextAttempt) {
+		c.logger.Debug("logtrack: send skipped during failure backoff",
+			"stage", "backoff",
+			"topic", topic,
+			"service", c.service,
+			"trace_id", traceID,
+			"shard", idx,
+			"retry_at", s.nextAttempt.Format(time.RFC3339Nano))
+		return
+	}
+
 	if s.conn == nil {
 		c.closeMu.RLock()
 		closed := c.closed
@@ -235,9 +257,13 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 				"shard", idx,
 				"size", len(frame),
 				"err", err)
+			if backoffEnabled {
+				s.nextAttempt = time.Now().Add(c.failureBackoff)
+			}
 			return
 		}
 		s.conn = conn
+		s.nextAttempt = time.Time{}
 	}
 
 	_ = s.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -252,6 +278,9 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 			"err", err)
 		_ = s.conn.Close()
 		s.conn = nil
+		if backoffEnabled {
+			s.nextAttempt = time.Now().Add(c.failureBackoff)
+		}
 	}
 }
 

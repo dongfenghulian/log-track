@@ -38,6 +38,31 @@ func newFakeServer(t *testing.T) *fakeServer {
 	return fs
 }
 
+func newIdleServer(t *testing.T) (addr string, closeFn func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				<-done
+			}(conn)
+		}
+	}()
+	return ln.Addr().String(), func() {
+		close(done)
+		_ = ln.Close()
+	}
+}
+
 func (s *fakeServer) addr() string { return s.ln.Addr().String() }
 
 func (s *fakeServer) close() { _ = s.ln.Close() }
@@ -217,7 +242,7 @@ func TestClient_ReconnectsAfterServerCloses(t *testing.T) {
 	}
 	defer c.Close()
 
-	c.send("topic-a", map[string]any{"i": 1}, "", "")
+	c.send(envelope.TopicEventTracks, map[string]any{"i": 1}, "", "")
 	waitForEnvelopes(t, fs, 1, 2*time.Second)
 
 	// Server closed mid-session. TCP half-close detection takes 1-2 writes:
@@ -225,7 +250,7 @@ func TestClient_ReconnectsAfterServerCloses(t *testing.T) {
 	// which clears the conn, third reconnects and lands. Send several follow-ups; expect at
 	// least one to reach the server after reconnect.
 	for i := 2; i <= 6; i++ {
-		c.send("topic-a", map[string]any{"i": i}, "", "")
+		c.send(envelope.TopicEventTracks, map[string]any{"i": i}, "", "")
 		time.Sleep(50 * time.Millisecond)
 	}
 	waitForEnvelopes(t, fs, 2, 3*time.Second) // first + at least one post-reconnect
@@ -308,6 +333,180 @@ func TestClient_DialFailureDoesNotPanic(t *testing.T) {
 	c.send("topic", map[string]any{"x": 1}, "trace", "") // must not panic
 }
 
+func TestClient_DialFailureBackoffSkipsImmediateReconnect(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	c, err := New(&Config{
+		GatewayAddr:    addr,
+		ServiceName:    "svc",
+		MaxConns:       1,
+		ConnectTimeout: 50 * time.Millisecond,
+		FailureBackoff: 200 * time.Millisecond,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.send("topic", map[string]any{"x": 1}, "", "")
+	first := c.shards[0].nextAttempt
+	if first.IsZero() {
+		t.Fatal("dial failure did not set nextAttempt")
+	}
+
+	c.send("topic", map[string]any{"x": 2}, "", "")
+	if got := c.shards[0].nextAttempt; !got.Equal(first) {
+		t.Fatalf("backoff send should not redial or move nextAttempt: got %v want %v", got, first)
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	c.send("topic", map[string]any{"x": 3}, "", "")
+	if got := c.shards[0].nextAttempt; !got.After(first) {
+		t.Fatalf("send after backoff should retry and extend nextAttempt: got %v first %v", got, first)
+	}
+}
+
+func TestClient_EventTracksBypassesFailureBackoff(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	c, err := New(&Config{
+		GatewayAddr:    addr,
+		ServiceName:    "svc",
+		MaxConns:       1,
+		ConnectTimeout: 50 * time.Millisecond,
+		FailureBackoff: 5 * time.Second,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.send(envelope.TopicEventTracks, map[string]any{"x": 1}, "", "")
+	if got := c.shards[0].nextAttempt; !got.IsZero() {
+		t.Fatalf("event-tracks should not enter failure backoff, got %v", got)
+	}
+	c.send(envelope.TopicEventTracks, map[string]any{"x": 2}, "", "")
+	if got := c.shards[0].nextAttempt; !got.IsZero() {
+		t.Fatalf("event-tracks should keep retrying without backoff, got %v", got)
+	}
+}
+
+func TestClient_EventTracksReconnectClearsFailureBackoff(t *testing.T) {
+	fs := newFakeServer(t)
+	defer fs.close()
+
+	c, err := New(&Config{
+		GatewayAddr:    fs.addr(),
+		ServiceName:    "svc",
+		MaxConns:       1,
+		FailureBackoff: 5 * time.Second,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	s := c.shards[0]
+	s.mu.Lock()
+	s.nextAttempt = time.Now().Add(c.failureBackoff)
+	s.mu.Unlock()
+
+	c.send("topic", map[string]any{"i": 1}, "", "")
+	if got := len(fs.envelopes()); got != 0 {
+		t.Fatalf("normal topic should be skipped during backoff, got %d envelopes", got)
+	}
+
+	c.send(envelope.TopicEventTracks, map[string]any{"i": 2}, "", "")
+	waitForEnvelopes(t, fs, 1, 2*time.Second)
+
+	s.mu.Lock()
+	nextAttempt := s.nextAttempt
+	s.mu.Unlock()
+	if !nextAttempt.IsZero() {
+		t.Fatalf("successful event-tracks reconnect should clear backoff, got %v", nextAttempt)
+	}
+
+	c.send("topic", map[string]any{"i": 3}, "", "")
+	waitForEnvelopes(t, fs, 2, 2*time.Second)
+}
+
+func TestClient_EventTracksWriteFailureBypassesFailureBackoff(t *testing.T) {
+	addr, closeFn := newIdleServer(t)
+	defer closeFn()
+
+	c, err := New(&Config{
+		GatewayAddr:    addr,
+		ServiceName:    "svc",
+		MaxConns:       1,
+		WriteTimeout:   20 * time.Millisecond,
+		FailureBackoff: 5 * time.Second,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	large := string(make([]byte, 8*1024*1024))
+	for i := 0; i < 20; i++ {
+		c.send(envelope.TopicEventTracks, map[string]any{"x": large}, "", "")
+		if c.shards[0].conn == nil {
+			break
+		}
+	}
+	if got := c.shards[0].nextAttempt; !got.IsZero() {
+		t.Fatalf("event-tracks write failure should not enter backoff, got %v", got)
+	}
+}
+
+func TestClient_WriteFailureBackoffSkipsImmediateReconnect(t *testing.T) {
+	addr, closeFn := newIdleServer(t)
+	defer closeFn()
+
+	c, err := New(&Config{
+		GatewayAddr:    addr,
+		ServiceName:    "svc",
+		MaxConns:       1,
+		WriteTimeout:   20 * time.Millisecond,
+		FailureBackoff: 5 * time.Second,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	large := string(make([]byte, 8*1024*1024))
+	for i := 0; i < 20; i++ {
+		c.send("topic", map[string]any{"x": large}, "", "")
+		if !c.shards[0].nextAttempt.IsZero() {
+			break
+		}
+	}
+
+	first := c.shards[0].nextAttempt
+	if first.IsZero() {
+		t.Fatal("write failure did not set nextAttempt")
+	}
+	c.send("topic", map[string]any{"x": large}, "", "")
+	if got := c.shards[0].nextAttempt; !got.Equal(first) {
+		t.Fatalf("backoff send should not redial or move nextAttempt: got %v want %v", got, first)
+	}
+}
+
 func TestEncodeFrame_RoundTrip(t *testing.T) {
 	env := &envelope.Envelope{
 		Version:   envelope.Version,
@@ -365,6 +564,9 @@ func TestNew_AppliesDefaults(t *testing.T) {
 	}
 	if c.writeTimeout != defaultWriteTimeout {
 		t.Errorf("writeTimeout=%v", c.writeTimeout)
+	}
+	if c.failureBackoff != defaultFailureBackoff {
+		t.Errorf("failureBackoff=%v", c.failureBackoff)
 	}
 }
 
