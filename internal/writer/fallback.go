@@ -114,6 +114,10 @@ func (f *FallbackWriter) Write(env *envelope.Envelope) error {
 	body = append(body, '\n')
 	n, err := f.current.Write(body)
 	if err != nil {
+		_ = f.current.Close()
+		f.current = nil
+		f.currentPath = ""
+		f.currentSize = 0
 		return err
 	}
 	f.currentSize += int64(n)

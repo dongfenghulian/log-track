@@ -289,3 +289,49 @@ func TestFallback_AdoptsStaleLogOnStartup(t *testing.T) {
 		t.Errorf("after adopt, expected 3 records, got %v", seen)
 	}
 }
+
+func TestFallback_WriteRecoverAfterWriteError(t *testing.T) {
+	// When f.current.Write fails, the fd must be closed and niled so the next
+	// Write call opens a fresh file instead of retrying the same broken fd.
+	dir := t.TempDir()
+	fw, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fw.Close()
+
+	// Inject a read-only file as the active write target to force a write error.
+	badPath := filepath.Join(dir, "bad.log")
+	if err := os.WriteFile(badPath, nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	badFile, err := os.OpenFile(badPath, os.O_RDONLY, 0o444)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fw.mu.Lock()
+	fw.current = badFile
+	fw.currentPath = badPath
+	fw.currentSize = 0
+	fw.mu.Unlock()
+
+	env := &envelope.Envelope{Version: envelope.Version, Topic: "t", Data: json.RawMessage(`{}`)}
+
+	// First write must fail.
+	if err := fw.Write(env); err == nil {
+		t.Fatal("expected write to fail on read-only fd, got nil")
+	}
+
+	// After the failure, f.current must be nil — broken fd discarded.
+	fw.mu.Lock()
+	stillSet := fw.current != nil
+	fw.mu.Unlock()
+	if stillSet {
+		t.Error("f.current was not cleared after write error")
+	}
+
+	// Second write must succeed — opens a new file.
+	if err := fw.Write(env); err != nil {
+		t.Fatalf("write after error recovery failed: %v", err)
+	}
+}
