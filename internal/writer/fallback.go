@@ -217,6 +217,13 @@ func (f *FallbackWriter) Peek() (*FallbackRecord, bool) {
 			}
 			return &FallbackRecord{Env: &env, file: f.peekState.path}, true
 		}
+		// scanner.Scan() returned false: either clean EOF or an I/O error.
+		// Only delete the file on clean EOF; on error, leave it for the next attempt.
+		if err := f.peekState.scanner.Err(); err != nil {
+			_ = f.peekState.f.Close()
+			f.peekState = nil
+			return nil, false
+		}
 		// EOF on this file → close, delete, advance.
 		_ = f.peekState.f.Close()
 		_ = os.Remove(f.peekState.path)

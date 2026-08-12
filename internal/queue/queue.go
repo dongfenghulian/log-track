@@ -10,21 +10,43 @@ import (
 
 // Queue buffers incoming envelopes and dispatches them to workers.
 type Queue struct {
-	ch chan *envelope.Envelope
-	wg sync.WaitGroup
+	ch         chan *envelope.Envelope
+	closeOnce  sync.Once
+	closed     bool
+	done       chan struct{}
+	producerMu sync.Mutex
+	producers  sync.WaitGroup
+	wg         sync.WaitGroup
 }
 
 // New creates a queue with the given capacity.
 func New(capacity int) *Queue {
-	return &Queue{ch: make(chan *envelope.Envelope, capacity)}
+	return &Queue{
+		ch:   make(chan *envelope.Envelope, capacity),
+		done: make(chan struct{}),
+	}
 }
 
-// Enqueue blocks until the envelope is accepted (or the channel is closed).
+// Enqueue blocks until the envelope is accepted or the queue is closed.
 // Server-side drops are not implemented here; backpressure is delegated to the TCP layer
 // (slow consumers slow down their TCP read loop, which slows down clients on shared connections).
-func (q *Queue) Enqueue(env *envelope.Envelope) {
-	q.ch <- env
-	metrics.QueueDepthSet(len(q.ch))
+func (q *Queue) Enqueue(env *envelope.Envelope) bool {
+	q.producerMu.Lock()
+	if q.closed {
+		q.producerMu.Unlock()
+		return false
+	}
+	q.producers.Add(1)
+	q.producerMu.Unlock()
+	defer q.producers.Done()
+
+	select {
+	case <-q.done:
+		return false
+	case q.ch <- env:
+		metrics.QueueDepthSet(len(q.ch))
+		return true
+	}
 }
 
 // Start spawns n workers calling fn for each envelope.
@@ -33,17 +55,41 @@ func (q *Queue) Start(n int, fn func(*envelope.Envelope)) {
 		q.wg.Add(1)
 		go func() {
 			defer q.wg.Done()
-			for env := range q.ch {
-				fn(env)
-				metrics.QueueDepthSet(len(q.ch))
+			for {
+				select {
+				case env := <-q.ch:
+					fn(env)
+					metrics.QueueDepthSet(len(q.ch))
+				case <-q.done:
+					for {
+						select {
+						case env := <-q.ch:
+							fn(env)
+							metrics.QueueDepthSet(len(q.ch))
+						default:
+							return
+						}
+					}
+				}
 			}
 		}()
 	}
 }
 
+// StopEnqueue releases blocked producers and makes future Enqueue calls return false.
+func (q *Queue) StopEnqueue() {
+	q.closeOnce.Do(func() {
+		q.producerMu.Lock()
+		q.closed = true
+		close(q.done)
+		q.producerMu.Unlock()
+	})
+	q.producers.Wait()
+}
+
 // Close signals workers to exit after draining and blocks until they do.
 func (q *Queue) Close() {
-	close(q.ch)
+	q.StopEnqueue()
 	q.wg.Wait()
 }
 

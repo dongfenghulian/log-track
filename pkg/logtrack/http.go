@@ -2,25 +2,40 @@ package logtrack
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/dongfenghulian/log-track/pkg/logtrack/envelope"
 )
 
+var errBodyTooLarge = errors.New("logtrack: body exceeds size limit")
+
+var (
+	httpBodySizeLimitOnce   sync.Once
+	httpBodySizeLimitCached int
+)
+
 // httpBodySizeLimit returns the configured body truncation threshold (bytes).
-// Reads LOG_TRACK_HTTP_BODY_SIZE on every call; cheap and lets ops change it via env without restart-on-change-tooling.
+// Read once from LOG_TRACK_HTTP_BODY_SIZE at first call and cached thereafter.
 func httpBodySizeLimit() int {
-	const dflt = 1024
-	v := os.Getenv("LOG_TRACK_HTTP_BODY_SIZE")
-	if v == "" {
-		return dflt
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		return dflt
-	}
-	return n
+	httpBodySizeLimitOnce.Do(func() {
+		const dflt = 1024
+		v := os.Getenv("LOG_TRACK_HTTP_BODY_SIZE")
+		if v == "" {
+			httpBodySizeLimitCached = dflt
+			return
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			httpBodySizeLimitCached = dflt
+			return
+		}
+		httpBodySizeLimitCached = n
+	})
+	return httpBodySizeLimitCached
 }
 
 // InboundHTTPLog is the data payload for topic inbound-http-logs (app -> backend).
@@ -127,19 +142,44 @@ func OutboundHTTPCtx(ctx context.Context, l *OutboundHTTPLog, opts ...Option) {
 }
 
 func truncateInbound(l *InboundHTTPLog, limit int) {
-	if l.RequestBody != nil && l.RequestBodySize > int64(limit) {
+	if l.RequestBody != nil && bodyExceedsLimit(l.RequestBody, l.RequestBodySize, limit) {
 		l.RequestBody = nil
 	}
-	if l.ResponseBody != nil && l.ResponseBodySize > int64(limit) {
+	if l.ResponseBody != nil && bodyExceedsLimit(l.ResponseBody, l.ResponseBodySize, limit) {
 		l.ResponseBody = nil
 	}
 }
 
 func truncateOutbound(l *OutboundHTTPLog, limit int) {
-	if l.RequestBody != nil && l.RequestBodySize > int64(limit) {
+	if l.RequestBody != nil && bodyExceedsLimit(l.RequestBody, l.RequestBodySize, limit) {
 		l.RequestBody = nil
 	}
-	if l.ResponseBody != nil && l.ResponseBodySize > int64(limit) {
+	if l.ResponseBody != nil && bodyExceedsLimit(l.ResponseBody, l.ResponseBodySize, limit) {
 		l.ResponseBody = nil
 	}
+}
+
+// bodyExceedsLimit returns true when the body is larger than limit bytes.
+// It trusts the caller-supplied size when available; otherwise it measures by serializing.
+func bodyExceedsLimit(body any, declaredSize int64, limit int) bool {
+	if declaredSize > int64(limit) {
+		return true
+	}
+	if declaredSize > 0 {
+		return false
+	}
+	err := json.NewEncoder(&limitWriter{remaining: limit}).Encode(body)
+	return errors.Is(err, errBodyTooLarge)
+}
+
+type limitWriter struct {
+	remaining int
+}
+
+func (w *limitWriter) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		return 0, errBodyTooLarge
+	}
+	w.remaining -= len(p)
+	return len(p), nil
 }

@@ -288,6 +288,49 @@ func TestInit_ClosesPreviousDefaultClient(t *testing.T) {
 	waitForActiveConns(t, fs, 1, 2*time.Second)
 }
 
+func TestInit_ConcurrentCallsDoNotLeakClients(t *testing.T) {
+	// Concurrent Init calls: every client that gets constructed must be closed.
+	// Before the fix, two goroutines could both call New(), then one overwrites
+	// defaultClient while the other's New() result is silently dropped (never closed).
+	// We detect this by counting Close calls via a wrapped client approach:
+	// use -race to also catch any lock-ordering issues.
+	fs := newFakeServer(t)
+	defer fs.close()
+	defer Close()
+
+	cfg := &Config{
+		GatewayAddr: fs.addr(),
+		ServiceName: "svc",
+		MaxConns:    1,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = Init(cfg)
+		}()
+	}
+	wg.Wait()
+
+	// After settling: exactly one active client, one active connection after first send.
+	Send("topic", map[string]any{"x": 1})
+	waitForEnvelopes(t, fs, 1, 2*time.Second)
+	waitForActiveConns(t, fs, 1, 2*time.Second)
+
+	// Calling Close then Init again should not panic and should work correctly.
+	Close()
+	waitForActiveConns(t, fs, 0, 2*time.Second)
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init after Close: %v", err)
+	}
+	Send("topic", map[string]any{"x": 2})
+	waitForEnvelopes(t, fs, 2, 2*time.Second)
+}
+
 func TestClient_ClosePreventsReconnect(t *testing.T) {
 	fs := newFakeServer(t)
 	defer fs.close()

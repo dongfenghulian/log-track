@@ -67,3 +67,38 @@ func TestQueue_LenReportsDepth(t *testing.T) {
 	q.Start(1, func(*envelope.Envelope) {})
 	q.Close()
 }
+
+func TestQueue_EnqueueReturnsFalseAfterClose(t *testing.T) {
+	q := New(1)
+	q.Start(1, func(*envelope.Envelope) {})
+	q.Close()
+	if ok := q.Enqueue(&envelope.Envelope{}); ok {
+		t.Errorf("enqueue after close should return false")
+	}
+}
+
+func TestQueue_CloseReleasesBlockedEnqueue(t *testing.T) {
+	q := New(1)
+	q.Enqueue(&envelope.Envelope{})
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- q.Enqueue(&envelope.Envelope{})
+	}()
+
+	select {
+	case <-done:
+		t.Fatalf("enqueue should block while queue is full")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	q.Close()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Errorf("enqueue released by close should return false")
+		}
+	case <-time.After(1 * time.Second):
+		t.Errorf("blocked enqueue was not released by close")
+	}
+}

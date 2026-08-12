@@ -2,6 +2,7 @@ package writer
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -183,6 +184,61 @@ func TestFallback_HandlesGarbageLines(t *testing.T) {
 	joined := strings.Join(topics, ",")
 	if joined != "t,t2" {
 		t.Errorf("expected garbage line skipped, got topics=%q", joined)
+	}
+}
+
+func TestFallback_PeekDoesNotDeleteFileOnScannerError(t *testing.T) {
+	// If scanner.Scan() returns false due to an I/O/buffer error (not clean EOF),
+	// Peek must NOT delete the file — that would silently destroy unread records.
+	dir := t.TempDir()
+	fw, err := NewFallbackWriter(dir, 64*1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write a valid record first.
+	if err := fw.Write(&envelope.Envelope{
+		Version: envelope.Version, Topic: "first", Data: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Write a record whose JSON line is larger than the scanner's 16MB buffer limit.
+	// bufio.Scanner will return Scan()=false with scanner.Err()=bufio.ErrTooLong.
+	huge := strings.Repeat("x", 17*1024*1024) // 17MB > 16MB scanner buffer
+	if err := fw.Write(&envelope.Envelope{
+		Version: envelope.Version, Topic: "huge",
+		Data: json.RawMessage(`{"x":"` + huge + `"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dones, _ := filepath.Glob(filepath.Join(dir, "*.log.done"))
+	if len(dones) != 1 {
+		t.Fatalf("expected 1 .done file, got %v", dones)
+	}
+
+	fw2, err := NewFallbackWriter(dir, 64*1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fw2.Close()
+
+	// Should return the first valid record.
+	rec, ok := fw2.Peek()
+	if !ok || rec.Env.Topic != "first" {
+		t.Errorf("expected first record, got ok=%v rec=%v", ok, rec)
+	}
+	// Next Peek hits the oversized line: scanner error → must return (nil, false) without deleting file.
+	rec2, ok2 := fw2.Peek()
+	if ok2 || rec2 != nil {
+		t.Errorf("expected Peek to stop on scanner error, got ok=%v", ok2)
+	}
+
+	// The .done file must still exist — it was not cleanly EOF'd.
+	if _, err := os.Stat(dones[0]); os.IsNotExist(err) {
+		t.Errorf("Peek deleted the fallback file on scanner error — unread records are lost")
 	}
 }
 

@@ -27,10 +27,12 @@ type Server struct {
 	queue  *queue.Queue
 	logger *slog.Logger
 
-	listener  net.Listener
-	connsMu   sync.Mutex
-	conns     map[net.Conn]struct{}
-	connCount atomic.Int64
+	listenerMu sync.Mutex
+	listener   net.Listener
+	connsMu    sync.Mutex
+	conns      map[net.Conn]struct{}
+	connsWG    sync.WaitGroup
+	connCount  atomic.Int64
 
 	shutdownMode atomic.Bool // when true, conn read loops use ConnReadTimeout
 }
@@ -53,7 +55,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	s.listener = ln
+	s.setListener(ln)
 	s.logger.Info("server listening", "addr", s.cfg.Address)
 
 	for {
@@ -78,11 +80,13 @@ func (s *Server) Start() error {
 		s.conns[conn] = struct{}{}
 		s.connsMu.Unlock()
 		metrics.ConnInc()
+		s.connsWG.Add(1)
 		go s.serve(conn)
 	}
 }
 
 func (s *Server) serve(conn net.Conn) {
+	defer s.connsWG.Done()
 	defer func() {
 		s.connsMu.Lock()
 		delete(s.conns, conn)
@@ -109,31 +113,52 @@ func (s *Server) serve(conn net.Conn) {
 			metrics.MessageObserved(env.Topic, "version_dropped")
 			continue
 		}
-		s.queue.Enqueue(env)
+		if ok := s.queue.Enqueue(env); !ok {
+			return
+		}
 	}
 }
 
 // Shutdown stops accepting new connections, then waits for existing ones to finish (bounded by ConnReadTimeout).
 func (s *Server) Shutdown(ctx context.Context) {
-	if s.listener != nil {
-		_ = s.listener.Close()
+	if ln := s.getListener(); ln != nil {
+		_ = ln.Close()
 	}
 	s.shutdownMode.Store(true)
+	s.queue.StopEnqueue()
+	s.applyReadDeadlineAll(time.Now().Add(s.cfg.ConnReadTimeout))
 
 	// Wait for conns to drain. Loop until conn count hits zero or ctx fires.
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		if s.connCount.Load() == 0 {
+			// connCount hits zero inside serve()'s cleanup defer, but connsWG.Done()
+			// fires after that in a separate defer. Wait here to ensure all goroutines
+			// have fully returned before Shutdown returns.
+			s.connsWG.Wait()
 			return
 		}
 		select {
 		case <-ctx.Done():
 			s.forceCloseAll()
+			s.connsWG.Wait()
 			return
 		case <-tick.C:
 		}
 	}
+}
+
+func (s *Server) setListener(ln net.Listener) {
+	s.listenerMu.Lock()
+	s.listener = ln
+	s.listenerMu.Unlock()
+}
+
+func (s *Server) getListener() net.Listener {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	return s.listener
 }
 
 func (s *Server) forceCloseAll() {
@@ -141,5 +166,13 @@ func (s *Server) forceCloseAll() {
 	defer s.connsMu.Unlock()
 	for c := range s.conns {
 		_ = c.Close()
+	}
+}
+
+func (s *Server) applyReadDeadlineAll(deadline time.Time) {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	for c := range s.conns {
+		_ = c.SetReadDeadline(deadline)
 	}
 }
