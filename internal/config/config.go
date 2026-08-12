@@ -49,16 +49,16 @@ func Load() Config {
 	return Config{
 		Server: ServerConfig{
 			Address:        getString("LOG_TRACK_SERVER_ADDRESS", ":9583"),
-			MaxConnections: getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 1024),
-			QueueSize:      getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 1000),
-			WorkerCount:    getInt("LOG_TRACK_SERVER_WORKER_COUNT", 20),
+			MaxConnections: getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 3000),
+			QueueSize:      getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 5000),
+			WorkerCount:    getInt("LOG_TRACK_SERVER_WORKER_COUNT", 30),
 			MaxMessageSize: getInt("LOG_TRACK_SERVER_MAX_MESSAGE_SIZE", 10*1024*1024),
 			MetricsAddress: getString("LOG_TRACK_METRICS_ADDRESS", ":9584"),
 		},
 		Kafka: KafkaConfig{
 			Brokers:      splitCSV(getString("LOG_TRACK_KAFKA_BROKERS", "kafka:9092")),
 			BatchSize:    getInt("LOG_TRACK_KAFKA_BATCH_SIZE", 100),
-			BatchTimeout: getDuration("LOG_TRACK_KAFKA_BATCH_TIMEOUT", 500*time.Millisecond),
+			BatchTimeout: getDuration("LOG_TRACK_KAFKA_BATCH_TIMEOUT", 10*time.Millisecond),
 			WriteTimeout: getDuration("LOG_TRACK_KAFKA_WRITE_TIMEOUT", 2*time.Second),
 		},
 		Fallback: FallbackConfig{

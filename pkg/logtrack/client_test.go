@@ -23,6 +23,7 @@ type fakeServer struct {
 	ln      net.Listener
 	mu      sync.Mutex
 	got     []envelope.Envelope
+	active  int
 	failNth atomic.Int32 // close conn after Nth message; 0 disables
 }
 
@@ -49,6 +50,12 @@ func (s *fakeServer) envelopes() []envelope.Envelope {
 	return out
 }
 
+func (s *fakeServer) activeConns() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active
+}
+
 func (s *fakeServer) acceptLoop() {
 	for {
 		conn, err := s.ln.Accept()
@@ -60,7 +67,15 @@ func (s *fakeServer) acceptLoop() {
 }
 
 func (s *fakeServer) handle(conn net.Conn) {
-	defer conn.Close()
+	s.mu.Lock()
+	s.active++
+	s.mu.Unlock()
+	defer func() {
+		_ = conn.Close()
+		s.mu.Lock()
+		s.active--
+		s.mu.Unlock()
+	}()
 	for {
 		var lenBuf [4]byte
 		if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
@@ -97,6 +112,18 @@ func waitForEnvelopes(t *testing.T, fs *fakeServer, want int, timeout time.Durat
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("only got %d envelopes, want %d", len(fs.envelopes()), want)
+}
+
+func waitForActiveConns(t *testing.T, fs *fakeServer, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fs.activeConns() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("active conns=%d, want %d", fs.activeConns(), want)
 }
 
 func TestClient_Send_BasicEnvelopeFields(t *testing.T) {
@@ -202,6 +229,69 @@ func TestClient_ReconnectsAfterServerCloses(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	waitForEnvelopes(t, fs, 2, 3*time.Second) // first + at least one post-reconnect
+}
+
+func TestInit_ClosesPreviousDefaultClient(t *testing.T) {
+	fs := newFakeServer(t)
+	defer fs.close()
+	defer Close()
+
+	if err := Init(&Config{
+		GatewayAddr: fs.addr(),
+		ServiceName: "svc",
+		MaxConns:    1,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	Send("topic-a", map[string]any{"i": 1})
+	waitForEnvelopes(t, fs, 1, 2*time.Second)
+	waitForActiveConns(t, fs, 1, 2*time.Second)
+
+	if err := Init(&Config{
+		GatewayAddr: fs.addr(),
+		ServiceName: "svc",
+		MaxConns:    1,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForActiveConns(t, fs, 0, 2*time.Second)
+
+	Send("topic-a", map[string]any{"i": 2})
+	waitForEnvelopes(t, fs, 2, 2*time.Second)
+	waitForActiveConns(t, fs, 1, 2*time.Second)
+}
+
+func TestClient_ClosePreventsReconnect(t *testing.T) {
+	fs := newFakeServer(t)
+	defer fs.close()
+
+	c, err := New(&Config{
+		GatewayAddr: fs.addr(),
+		ServiceName: "svc",
+		MaxConns:    1,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c.send("topic-a", map[string]any{"i": 1}, "", "")
+	waitForEnvelopes(t, fs, 1, 2*time.Second)
+	waitForActiveConns(t, fs, 1, 2*time.Second)
+
+	c.Close()
+	waitForActiveConns(t, fs, 0, 2*time.Second)
+
+	c.send("topic-a", map[string]any{"i": 2}, "", "")
+	time.Sleep(100 * time.Millisecond)
+	if got := len(fs.envelopes()); got != 1 {
+		t.Fatalf("closed client should not send again, got %d envelopes", got)
+	}
+	if got := fs.activeConns(); got != 0 {
+		t.Fatalf("closed client reconnected, active conns=%d", got)
+	}
 }
 
 func TestClient_DialFailureDoesNotPanic(t *testing.T) {

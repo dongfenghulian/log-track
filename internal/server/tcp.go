@@ -68,7 +68,10 @@ func (s *Server) Start() error {
 		if int(s.connCount.Add(1)) > s.cfg.MaxConnections {
 			s.connCount.Add(-1)
 			_ = conn.Close()
-			s.logger.Warn("connection limit reached, dropping", "addr", conn.RemoteAddr())
+			s.logger.Warn("connection limit reached, dropping",
+				"addr", conn.RemoteAddr(),
+				"current_connections", s.connCount.Load(),
+				"max_connections", s.cfg.MaxConnections)
 			continue
 		}
 		s.connsMu.Lock()

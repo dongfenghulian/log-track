@@ -252,19 +252,37 @@ func (f *FallbackWriter) Ack(*FallbackRecord) {}
 func (f *FallbackWriter) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	var firstErr error
+	if f.peekState != nil {
+		if err := f.peekState.f.Close(); err != nil {
+			firstErr = err
+		}
+		f.peekState = nil
+	}
+
 	if f.current == nil {
-		return nil
+		return firstErr
 	}
 	if err := f.current.Sync(); err != nil {
 		_ = f.current.Close()
+		f.current = nil
+		f.currentPath = ""
+		f.currentSize = 0
 		return err
 	}
 	if err := f.current.Close(); err != nil {
-		return err
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else {
+		done := f.currentPath + ".done"
+		if err := os.Rename(f.currentPath, done); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	done := f.currentPath + ".done"
-	_ = os.Rename(f.currentPath, done)
 	f.current = nil
 	f.currentPath = ""
-	return nil
+	f.currentSize = 0
+	return firstErr
 }

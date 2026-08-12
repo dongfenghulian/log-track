@@ -19,13 +19,19 @@ func TestLoad_Defaults(t *testing.T) {
 	if c.Server.Address != ":9583" {
 		t.Errorf("address=%q", c.Server.Address)
 	}
-	if c.Server.QueueSize != 1000 {
+	if c.Server.QueueSize != 5000 {
 		t.Errorf("queue_size=%d", c.Server.QueueSize)
+	}
+	if c.Server.MaxConnections != 3000 {
+		t.Errorf("max_connections=%d", c.Server.MaxConnections)
+	}
+	if c.Server.WorkerCount != 30 {
+		t.Errorf("worker_count=%d", c.Server.WorkerCount)
 	}
 	if len(c.Kafka.Brokers) != 1 || c.Kafka.Brokers[0] != "kafka:9092" {
 		t.Errorf("brokers=%v", c.Kafka.Brokers)
 	}
-	if c.Kafka.BatchTimeout != 500*time.Millisecond {
+	if c.Kafka.BatchTimeout != 10*time.Millisecond {
 		t.Errorf("batch_timeout=%v", c.Kafka.BatchTimeout)
 	}
 	if c.Kafka.WriteTimeout != 2*time.Second {
@@ -66,10 +72,10 @@ func TestLoad_InvalidEnvFallsBackToDefault(t *testing.T) {
 	t.Setenv("LOG_TRACK_SERVER_QUEUE_SIZE", "not-a-number")
 	t.Setenv("LOG_TRACK_KAFKA_BATCH_TIMEOUT", "not-a-duration")
 	c := Load()
-	if c.Server.QueueSize != 1000 {
+	if c.Server.QueueSize != 5000 {
 		t.Errorf("invalid int should fall back, got %d", c.Server.QueueSize)
 	}
-	if c.Kafka.BatchTimeout != 500*time.Millisecond {
+	if c.Kafka.BatchTimeout != 10*time.Millisecond {
 		t.Errorf("invalid duration should fall back, got %v", c.Kafka.BatchTimeout)
 	}
 }

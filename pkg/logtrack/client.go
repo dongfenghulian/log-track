@@ -52,6 +52,8 @@ type Client struct {
 	writeTimeout   time.Duration
 	logger         *slog.Logger
 	shards         []*shardConn
+	closed         bool
+	closeMu        sync.RWMutex
 }
 
 type shardConn struct {
@@ -71,8 +73,12 @@ func Init(cfg *Config) error {
 		return err
 	}
 	defaultMu.Lock()
+	old := defaultClient
 	defaultClient = c
 	defaultMu.Unlock()
+	if old != nil {
+		old.Close()
+	}
 	return nil
 }
 
@@ -142,6 +148,10 @@ func New(cfg *Config) (*Client, error) {
 
 // Close releases all shard connections. Safe to call multiple times.
 func (c *Client) Close() {
+	c.closeMu.Lock()
+	c.closed = true
+	c.closeMu.Unlock()
+
 	for _, s := range c.shards {
 		s.mu.Lock()
 		if s.conn != nil {
@@ -163,6 +173,13 @@ func (c *Client) shardIndex(traceID string) int {
 
 // send is the single entry point all helpers funnel into.
 func (c *Client) send(topic string, data any, traceID, partitionKey string) {
+	c.closeMu.RLock()
+	if c.closed {
+		c.closeMu.RUnlock()
+		return
+	}
+	c.closeMu.RUnlock()
+
 	payload, err := json.Marshal(data)
 	if err != nil {
 		c.logger.Error("logtrack: serialize failed",
@@ -202,6 +219,12 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	defer s.mu.Unlock()
 
 	if s.conn == nil {
+		c.closeMu.RLock()
+		closed := c.closed
+		c.closeMu.RUnlock()
+		if closed {
+			return
+		}
 		conn, err := net.DialTimeout("tcp", c.addr, c.connectTimeout)
 		if err != nil {
 			c.logger.Warn("logtrack: dial failed",

@@ -173,12 +173,12 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 | 配置项                       | 建议值         | 说明                                 |
 | ---------------------------- | -------------- | ------------------------------------ |
 | server.address               | :9583          | TCP 监听地址                         |
-| server.max_connections       | 10000          | 最大连接数                           |
-| server.queue_size            | 50000          | 消息队列大小                         |
-| server.worker_count          | 100            | Worker 数量                          |
+| server.max_connections       | 3000           | 最大连接数                           |
+| server.queue_size            | 5000           | 消息队列大小                         |
+| server.worker_count          | 30             | Worker 数量                          |
 | kafka.brokers                | ["kafka:9092"] | Kafka 集群地址                       |
 | kafka.batch_size             | 100            | 批量发送数量                         |
-| kafka.batch_timeout          | 5s             | 批量发送间隔                         |
+| kafka.batch_timeout          | 10ms           | 批量发送间隔                         |
 | fallback.data_dir            | /data/logtrack | 降级文件目录                         |
 | fallback.max_file_size       | 100MB          | 单文件最大大小                       |
 | fallback.max_files           | 10             | 最大文件数量                         |
