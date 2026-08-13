@@ -3,7 +3,7 @@ module github.com/dongfenghulian/log-track
 go 1.26.2
 
 require (
-	github.com/dongfenghulian/log-track/pkg/logtrack v0.0.0
+	github.com/dongfenghulian/log-track/pkg/logtrack v0.2.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/segmentio/kafka-go v0.4.51
 )
@@ -13,6 +13,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
