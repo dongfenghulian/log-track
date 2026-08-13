@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dongfenghulian/log-track/internal/metrics"
 	"github.com/dongfenghulian/log-track/pkg/logtrack/envelope"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestFallback_WriteAndPeek(t *testing.T) {
@@ -333,5 +335,45 @@ func TestFallback_WriteRecoverAfterWriteError(t *testing.T) {
 	// Second write must succeed — opens a new file.
 	if err := fw.Write(env); err != nil {
 		t.Fatalf("write after error recovery failed: %v", err)
+	}
+}
+
+func TestFallback_PeekUpdatesFallbackFilesGauge(t *testing.T) {
+	// Peek() deletes a .log.done file when it reaches EOF, but the fallback_files gauge
+	// must be decremented at that point — not only after rotate().
+	dir := t.TempDir()
+	fw, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fw.Write(&envelope.Envelope{Version: envelope.Version, Topic: "t", Data: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fw.Close(); err != nil { // rotates to .log.done, gauge set to 1
+		t.Fatal(err)
+	}
+
+	fw2, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fw2.Close()
+
+	if got := testutil.ToFloat64(metrics.FallbackFilesGauge()); got != 1 {
+		t.Fatalf("pre-peek gauge = %v, want 1", got)
+	}
+
+	// Drain the file completely — EOF causes deletion.
+	for {
+		rec, ok := fw2.Peek()
+		if !ok {
+			break
+		}
+		fw2.Ack(rec)
+	}
+
+	// After the file is drained and deleted, the gauge must reflect 0.
+	if got := testutil.ToFloat64(metrics.FallbackFilesGauge()); got != 0 {
+		t.Errorf("post-peek gauge = %v, want 0 (Peek did not update fallback_files gauge on file deletion)", got)
 	}
 }

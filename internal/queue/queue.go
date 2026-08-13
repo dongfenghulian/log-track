@@ -61,6 +61,7 @@ func (q *Queue) Start(n int, fn func(*envelope.Envelope)) {
 					fn(env)
 					metrics.QueueDepthSet(len(q.ch))
 				case <-q.done:
+					q.producers.Wait()
 					for {
 						select {
 						case env := <-q.ch:

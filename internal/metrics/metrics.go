@@ -121,6 +121,9 @@ func KafkaHealthy(ok bool) {
 // FallbackFilesSet should be called by the fallback writer after rotation.
 func FallbackFilesSet(n int) { fallbackFiles.Set(float64(n)) }
 
+// FallbackFilesGauge returns the underlying gauge for use in tests.
+func FallbackFilesGauge() prometheus.Gauge { return fallbackFiles }
+
 // FallbackWriteInc on every fallback write.
 func FallbackWriteInc() { fallbackWritesTotal.Inc() }
 

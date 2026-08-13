@@ -232,6 +232,9 @@ func (f *FallbackWriter) Peek() (*FallbackRecord, bool) {
 		_ = f.peekState.f.Close()
 		_ = os.Remove(f.peekState.path)
 		f.peekState = nil
+		if dones, err := f.listDoneFiles(); err == nil {
+			metrics.FallbackFilesSet(len(dones))
+		}
 	}
 }
 

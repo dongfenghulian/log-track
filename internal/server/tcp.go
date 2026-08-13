@@ -34,7 +34,9 @@ type Server struct {
 	connsWG    sync.WaitGroup
 	connCount  atomic.Int64
 
-	shutdownMode atomic.Bool // when true, conn read loops use ConnReadTimeout
+	acceptStarted atomic.Bool
+	acceptDone    chan struct{}
+	shutdownMode  atomic.Bool // when true, conn read loops use ConnReadTimeout
 }
 
 func New(cfg Config, q *queue.Queue, logger *slog.Logger) *Server {
@@ -42,15 +44,21 @@ func New(cfg Config, q *queue.Queue, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	return &Server{
-		cfg:    cfg,
-		queue:  q,
-		logger: logger,
-		conns:  make(map[net.Conn]struct{}),
+		cfg:        cfg,
+		queue:      q,
+		logger:     logger,
+		conns:      make(map[net.Conn]struct{}),
+		acceptDone: make(chan struct{}),
 	}
 }
 
 // Start begins accepting connections. Returns when the listener errors or is closed.
 func (s *Server) Start() error {
+	if !s.acceptStarted.CompareAndSwap(false, true) {
+		return errors.New("server already started")
+	}
+	defer close(s.acceptDone)
+
 	ln, err := net.Listen("tcp", s.cfg.Address)
 	if err != nil {
 		return err
@@ -125,8 +133,17 @@ func (s *Server) Shutdown(ctx context.Context) {
 		_ = ln.Close()
 	}
 	s.shutdownMode.Store(true)
-	s.queue.StopEnqueue()
 	s.applyReadDeadlineAll(time.Now().Add(s.cfg.ConnReadTimeout))
+	if s.acceptStarted.Load() {
+		select {
+		case <-s.acceptDone:
+		case <-ctx.Done():
+			s.queue.StopEnqueue()
+			s.forceCloseAll()
+			s.connsWG.Wait()
+			return
+		}
+	}
 
 	// Wait for conns to drain. Loop until conn count hits zero or ctx fires.
 	tick := time.NewTicker(50 * time.Millisecond)
@@ -141,6 +158,7 @@ func (s *Server) Shutdown(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
+			s.queue.StopEnqueue()
 			s.forceCloseAll()
 			s.connsWG.Wait()
 			return

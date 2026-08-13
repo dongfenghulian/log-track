@@ -189,6 +189,24 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	}
 	c.closeMu.RUnlock()
 
+	idx := c.shardIndex(traceID)
+	s := c.shards[idx]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	backoffEnabled := topic != envelope.TopicEventTracks
+	if backoffEnabled && now.Before(s.nextAttempt) {
+		c.logger.Debug("logtrack: send skipped during failure backoff",
+			"stage", "backoff",
+			"topic", topic,
+			"service", c.service,
+			"trace_id", traceID,
+			"shard", idx,
+			"retry_at", s.nextAttempt.Format(time.RFC3339Nano))
+		return
+	}
+
 	payload, err := json.Marshal(data)
 	if err != nil {
 		c.logger.Error("logtrack: serialize failed",
@@ -199,7 +217,7 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 			"err", err)
 		return
 	}
-	now := time.Now()
+	now = time.Now()
 	env := envelope.Envelope{
 		Version:      envelope.Version,
 		Topic:        topic,
@@ -219,24 +237,6 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 			"service", c.service,
 			"trace_id", traceID,
 			"err", err)
-		return
-	}
-
-	idx := c.shardIndex(traceID)
-	s := c.shards[idx]
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now = time.Now()
-	backoffEnabled := topic != envelope.TopicEventTracks
-	if backoffEnabled && now.Before(s.nextAttempt) {
-		c.logger.Debug("logtrack: send skipped during failure backoff",
-			"stage", "backoff",
-			"topic", topic,
-			"service", c.service,
-			"trace_id", traceID,
-			"shard", idx,
-			"retry_at", s.nextAttempt.Format(time.RFC3339Nano))
 		return
 	}
 

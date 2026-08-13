@@ -415,6 +415,39 @@ func TestClient_DialFailureBackoffSkipsImmediateReconnect(t *testing.T) {
 	}
 }
 
+func TestClient_BackoffSkipsBeforeSerialize(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	c, err := New(&Config{
+		GatewayAddr:    addr,
+		ServiceName:    "svc",
+		MaxConns:       1,
+		ConnectTimeout: 50 * time.Millisecond,
+		FailureBackoff: time.Second,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.send("topic", map[string]any{"x": 1}, "", "")
+	first := c.shards[0].nextAttempt
+	if first.IsZero() {
+		t.Fatal("dial failure did not set nextAttempt")
+	}
+
+	c.send("topic", map[string]any{"bad": make(chan struct{})}, "", "")
+	if got := c.shards[0].nextAttempt; !got.Equal(first) {
+		t.Fatalf("backoff send should skip before serialization: got %v want %v", got, first)
+	}
+}
+
 func TestClient_EventTracksBypassesFailureBackoff(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
