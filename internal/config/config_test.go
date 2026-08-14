@@ -85,10 +85,18 @@ func TestLoad_EnvOverrides(t *testing.T) {
 
 func TestLoad_InvalidEnvFallsBackToDefault(t *testing.T) {
 	t.Setenv("LOG_TRACK_SERVER_QUEUE_SIZE", "not-a-number")
+	t.Setenv("LOG_TRACK_SERVER_CRITICAL_QUEUE_SIZE", "-1")
+	t.Setenv("LOG_TRACK_SERVER_CRITICAL_WORKER_COUNT", "0")
 	t.Setenv("LOG_TRACK_KAFKA_BATCH_TIMEOUT", "not-a-duration")
 	c := Load()
 	if c.Server.QueueSize != 5000 {
 		t.Errorf("invalid int should fall back, got %d", c.Server.QueueSize)
+	}
+	if c.Server.CriticalQueueSize != 2000 {
+		t.Errorf("invalid critical queue size should fall back, got %d", c.Server.CriticalQueueSize)
+	}
+	if c.Server.CriticalWorkerCount != 10 {
+		t.Errorf("invalid critical worker count should fall back, got %d", c.Server.CriticalWorkerCount)
 	}
 	if c.Kafka.BatchTimeout != 10*time.Millisecond {
 		t.Errorf("invalid duration should fall back, got %v", c.Kafka.BatchTimeout)

@@ -3,7 +3,7 @@ module github.com/dongfenghulian/log-track
 go 1.26.2
 
 require (
-	github.com/dongfenghulian/log-track/pkg/logtrack v0.2.2
+	github.com/dongfenghulian/log-track/pkg/logtrack v0.2.3
 	github.com/prometheus/client_golang v1.23.2
 	github.com/segmentio/kafka-go v0.4.51
 )
