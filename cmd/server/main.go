@@ -51,7 +51,9 @@ func main() {
 		"brokers", cfg.Kafka.Brokers,
 		"max_connections", cfg.Server.MaxConnections,
 		"queue_capacity", cfg.Server.QueueSize,
-		"worker_goroutines", cfg.Server.WorkerCount)
+		"worker_goroutines", cfg.Server.WorkerCount,
+		"critical_queue_capacity", cfg.Server.CriticalQueueSize,
+		"critical_worker_goroutines", cfg.Server.CriticalWorkerCount)
 
 	// Wire writers.
 	kafkaWriter := writer.NewKafkaWriter(cfg.Kafka.Brokers, cfg.Kafka.BatchSize, cfg.Kafka.BatchTimeout, cfg.Kafka.WriteTimeout)
@@ -65,8 +67,7 @@ func main() {
 
 	// Wire queue + workers.
 	pass := &passthrough.Handler{}
-	q := queue.New(cfg.Server.QueueSize)
-	q.Start(cfg.Server.WorkerCount, func(env *envelope.Envelope) {
+	dispatch := func(env *envelope.Envelope) {
 		h, ok := router.Lookup(env.Topic)
 		if !ok {
 			if err := pass.Handle(env); err != nil {
@@ -83,7 +84,11 @@ func main() {
 			return
 		}
 		metrics.MessageObserved(env.Topic, "handled")
-	})
+	}
+	normalQ := queue.NewNamed("normal", cfg.Server.QueueSize)
+	criticalQ := queue.NewNamed("critical", cfg.Server.CriticalQueueSize)
+	normalQ.Start(cfg.Server.WorkerCount, dispatch)
+	criticalQ.Start(cfg.Server.CriticalWorkerCount, dispatch)
 
 	// Wire server.
 	srv := server.New(server.Config{
@@ -91,7 +96,7 @@ func main() {
 		MaxConnections:  cfg.Server.MaxConnections,
 		MaxMessageSize:  cfg.Server.MaxMessageSize,
 		ConnReadTimeout: cfg.Shutdown.ConnReadTimeout,
-	}, q, logger)
+	}, normalQ, criticalQ, logger)
 
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -121,9 +126,10 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Shutdown.Timeout)
 	defer cancel()
 
-	// Order: stop accepting new conns → drain existing → drain queue → flush kafka → close fallback.
+	// Order: stop accepting new conns → drain existing → drain queues → flush kafka → close fallback.
 	srv.Shutdown(shutdownCtx)
-	q.Close()
+	normalQ.Close()
+	criticalQ.Close()
 
 	// Manager.Shutdown handles the kafka flush + fallback close, bounded by remaining time in shutdownCtx.
 	manager.Shutdown(shutdownCtx)

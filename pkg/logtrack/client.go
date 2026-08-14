@@ -38,7 +38,7 @@ const (
 type Config struct {
 	GatewayAddr    string
 	ServiceName    string
-	MaxConns       int           // 1..4, defaults to 4
+	MaxConns       int           // per-pool conn count: this many event-tracks conns + this many normal conns; 1..16, defaults to 4
 	ConnectTimeout time.Duration // defaults to 3s
 	WriteTimeout   time.Duration // defaults to 1s
 	FailureBackoff time.Duration // defaults to 5s; <=0 uses default
@@ -54,7 +54,8 @@ type Client struct {
 	writeTimeout   time.Duration
 	failureBackoff time.Duration
 	logger         *slog.Logger
-	shards         []*shardConn
+	eventShards    []*shardConn
+	normalShards   []*shardConn
 	closed         bool
 	closeMu        sync.RWMutex
 }
@@ -139,9 +140,11 @@ func New(cfg *Config) (*Client, error) {
 	}
 	host, _ := os.Hostname()
 
-	shards := make([]*shardConn, maxConns)
-	for i := range shards {
-		shards[i] = &shardConn{}
+	eventShards := make([]*shardConn, maxConns)
+	normalShards := make([]*shardConn, maxConns)
+	for i := range eventShards {
+		eventShards[i] = &shardConn{}
+		normalShards[i] = &shardConn{}
 	}
 	return &Client{
 		addr:           addr,
@@ -151,7 +154,8 @@ func New(cfg *Config) (*Client, error) {
 		writeTimeout:   writeTO,
 		failureBackoff: failureBackoff,
 		logger:         logger,
-		shards:         shards,
+		eventShards:    eventShards,
+		normalShards:   normalShards,
 	}, nil
 }
 
@@ -161,7 +165,15 @@ func (c *Client) Close() {
 	c.closed = true
 	c.closeMu.Unlock()
 
-	for _, s := range c.shards {
+	for _, s := range c.eventShards {
+		s.mu.Lock()
+		if s.conn != nil {
+			_ = s.conn.Close()
+			s.conn = nil
+		}
+		s.mu.Unlock()
+	}
+	for _, s := range c.normalShards {
 		s.mu.Lock()
 		if s.conn != nil {
 			_ = s.conn.Close()
@@ -171,13 +183,13 @@ func (c *Client) Close() {
 	}
 }
 
-func (c *Client) shardIndex(traceID string) int {
+func (c *Client) shardIndex(traceID string, size int) int {
 	if traceID == "" {
 		return 0
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(traceID))
-	return int(h.Sum32() % uint32(len(c.shards)))
+	return int(h.Sum32() % uint32(size))
 }
 
 // send is the single entry point all helpers funnel into.
@@ -189,8 +201,14 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	}
 	c.closeMu.RUnlock()
 
-	idx := c.shardIndex(traceID)
-	s := c.shards[idx]
+	var shards []*shardConn
+	if topic == envelope.TopicEventTracks {
+		shards = c.eventShards
+	} else {
+		shards = c.normalShards
+	}
+	idx := c.shardIndex(traceID, len(shards))
+	s := shards[idx]
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -9,6 +9,7 @@ func TestLoad_Defaults(t *testing.T) {
 	// Clear any caller-set env vars so defaults apply.
 	for _, k := range []string{
 		"LOG_TRACK_SERVER_ADDRESS", "LOG_TRACK_SERVER_QUEUE_SIZE",
+		"LOG_TRACK_SERVER_CRITICAL_QUEUE_SIZE", "LOG_TRACK_SERVER_CRITICAL_WORKER_COUNT",
 		"LOG_TRACK_KAFKA_BROKERS", "LOG_TRACK_KAFKA_BATCH_TIMEOUT",
 		"LOG_TRACK_FALLBACK_DATA_DIR", "LOG_TRACK_SHUTDOWN_TIMEOUT",
 		"LOG_TRACK_METRICS_ADDRESS",
@@ -27,6 +28,12 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if c.Server.WorkerCount != 30 {
 		t.Errorf("worker_count=%d", c.Server.WorkerCount)
+	}
+	if c.Server.CriticalQueueSize != 2000 {
+		t.Errorf("critical_queue_size=%d", c.Server.CriticalQueueSize)
+	}
+	if c.Server.CriticalWorkerCount != 10 {
+		t.Errorf("critical_worker_count=%d", c.Server.CriticalWorkerCount)
 	}
 	if len(c.Kafka.Brokers) != 1 || c.Kafka.Brokers[0] != "kafka:9092" {
 		t.Errorf("brokers=%v", c.Kafka.Brokers)
@@ -53,12 +60,20 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	t.Setenv("LOG_TRACK_KAFKA_BROKERS", "a:1,b:2 , c:3")
 	t.Setenv("LOG_TRACK_KAFKA_BATCH_TIMEOUT", "250ms")
 	t.Setenv("LOG_TRACK_SERVER_QUEUE_SIZE", "777")
+	t.Setenv("LOG_TRACK_SERVER_CRITICAL_QUEUE_SIZE", "333")
+	t.Setenv("LOG_TRACK_SERVER_CRITICAL_WORKER_COUNT", "9")
 	c := Load()
 	if c.Server.Address != "0.0.0.0:9999" {
 		t.Errorf("address=%q", c.Server.Address)
 	}
 	if c.Server.QueueSize != 777 {
 		t.Errorf("queue_size=%d", c.Server.QueueSize)
+	}
+	if c.Server.CriticalQueueSize != 333 {
+		t.Errorf("critical_queue_size=%d", c.Server.CriticalQueueSize)
+	}
+	if c.Server.CriticalWorkerCount != 9 {
+		t.Errorf("critical_worker_count=%d", c.Server.CriticalWorkerCount)
 	}
 	if got := c.Kafka.Brokers; len(got) != 3 || got[0] != "a:1" || got[1] != "b:2" || got[2] != "c:3" {
 		t.Errorf("brokers=%v", got)

@@ -120,9 +120,9 @@ LogTrack 是一个轻量级的统一日志收集系统，专为 Go 微服务架�
 | **Message Queue**         | 缓冲接收到的消息，削峰填谷                                            |
 | **Worker Pool**           | 消费队列，并行处理消息                                                |
 | **Message Router**        | 解析 topic 字段，命中 handler 走 handler，否则走通用 passthrough      |
-| **Inbound HTTP Handler**  | 校验 inbound HTTP 日志格式（topic=inbound-http-logs，app→后端，量大） |
-| **Outbound HTTP Handler** | 校验 outbound HTTP 日志格式（topic=outbound-http-logs，后端→三方）    |
-| **Event Handler**         | 校验事件埋点（topic=event-tracks）                                    |
+| **Inbound HTTP Handler**  | 转发 inbound HTTP 日志（topic=inbound-http-logs，app→后端，量大）     |
+| **Outbound HTTP Handler** | 转发 outbound HTTP 日志（topic=outbound-http-logs，后端→三方）        |
+| **Event Handler**         | 转发事件埋点（topic=event-tracks）                                    |
 | **RPC Handler**           | 校验 RPC 日志，识别慢调用/错误（topic=rpc-calls）                     |
 | **App Handler**           | 按日志级别分流处理（topic=app-logs，按 level 落 4 个不同 Kafka topic） |
 | **Passthrough Handler**   | 未命中已注册 handler 时使用，不做校验，整封写入对应 topic             |

@@ -130,7 +130,7 @@ func init() {
 type Handler struct{}
 
 func (h *Handler) Topic() string { return envelope.TopicInboundHTTPLogs }
-func (h *Handler) Handle(env *envelope.Envelope) error { /* 校验 + 转发 writer */ }
+func (h *Handler) Handle(env *envelope.Envelope) error { /* 转发 writer */ }
 ```
 
 ### 3.2 聚合包（关键）
@@ -169,18 +169,21 @@ import (
 | 环境变量                              | 默认值           | 说明                                 |
 | ------------------------------------- | ---------------- | ------------------------------------ |
 | `LOG_TRACK_SERVER_ADDRESS`            | `:9583`          | TCP 监听地址                         |
-| `LOG_TRACK_SERVER_MAX_CONNECTIONS`    | `10000`          | 最大连接数                           |
-| `LOG_TRACK_SERVER_QUEUE_SIZE`         | `50000`          | 消息队列大小                         |
-| `LOG_TRACK_SERVER_WORKER_COUNT`       | `100`            | Worker 数量                          |
+| `LOG_TRACK_SERVER_MAX_CONNECTIONS`    | `3000`           | 最大连接数                           |
+| `LOG_TRACK_SERVER_QUEUE_SIZE`         | `5000`           | 普通消息队列大小                     |
+| `LOG_TRACK_SERVER_WORKER_COUNT`       | `30`             | 普通队列 Worker 数量                 |
+| `LOG_TRACK_SERVER_CRITICAL_QUEUE_SIZE`| `2000`           | critical 队列大小（event-tracks）     |
+| `LOG_TRACK_SERVER_CRITICAL_WORKER_COUNT` | `10`          | critical 队列 Worker 数量             |
 | `LOG_TRACK_SERVER_MAX_MESSAGE_SIZE`   | `10485760`       | 单消息上限（字节，10MB）             |
 | `LOG_TRACK_KAFKA_BROKERS`             | `kafka:9092`     | Kafka 集群地址，多个用逗号分隔       |
 | `LOG_TRACK_KAFKA_BATCH_SIZE`          | `100`            | 批量发送数量                         |
-| `LOG_TRACK_KAFKA_BATCH_TIMEOUT`       | `5s`             | 批量发送间隔                         |
+| `LOG_TRACK_KAFKA_BATCH_TIMEOUT`       | `10ms`           | 批量发送间隔                         |
+| `LOG_TRACK_KAFKA_WRITE_TIMEOUT`       | `2s`             | Kafka 写入超时                       |
 | `LOG_TRACK_FALLBACK_DATA_DIR`         | `/data/logtrack` | 降级文件目录                         |
 | `LOG_TRACK_FALLBACK_MAX_FILE_SIZE`    | `104857600`      | 单文件最大字节数（100MB）            |
 | `LOG_TRACK_FALLBACK_MAX_FILES`        | `10`             | 最大文件数量                         |
-| `LOG_TRACK_SHUTDOWN_TIMEOUT`          | `10s`            | 优雅停机总超时                       |
-| `LOG_TRACK_SHUTDOWN_CONN_READ_TIMEOUT`| `5s`             | 关 listener 后已有连接的最长读取时间 |
+| `LOG_TRACK_SHUTDOWN_TIMEOUT`          | `5s`             | 优雅停机总超时                       |
+| `LOG_TRACK_SHUTDOWN_CONN_READ_TIMEOUT`| `3s`             | 关 listener 后已有连接的最长读取时间 |
 | `LOG_TRACK_SHUTDOWN_KAFKA_FLUSH_TIMEOUT` | `3s`          | 停机阶段 Kafka flush 单步超时        |
 
 ### 4.2 客户端 SDK

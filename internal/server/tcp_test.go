@@ -22,7 +22,7 @@ func TestServer_ShutdownReturnsWhenQueueIsFull(t *testing.T) {
 		MaxConnections:  2,
 		MaxMessageSize:  1024 * 1024,
 		ConnReadTimeout: 10 * time.Millisecond,
-	}, q, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, q, q, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -71,6 +71,45 @@ func TestServer_ShutdownReturnsWhenQueueIsFull(t *testing.T) {
 	}
 }
 
+func TestServer_RoutesEventTracksToCriticalQueue(t *testing.T) {
+	addr := reserveTCPAddr(t)
+	normalQ := queue.New(10)
+	criticalQ := queue.New(10)
+	srv := New(Config{
+		Address:         addr,
+		MaxConnections:  2,
+		MaxMessageSize:  1024 * 1024,
+		ConnReadTimeout: 10 * time.Millisecond,
+	}, normalQ, criticalQ, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	go srv.Start()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+		normalQ.Close()
+		criticalQ.Close()
+	})
+
+	waitForListen(t, addr)
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFrame(t, conn, envelope.TopicEventTracks)
+	writeTestFrame(t, conn, "custom-topic")
+	_ = conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if normalQ.Len() == 1 && criticalQ.Len() == 1 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("queue depths normal=%d critical=%d", normalQ.Len(), criticalQ.Len())
+}
+
 func TestServer_ShutdownWaitsForServeGoroutines(t *testing.T) {
 	// Regression: Shutdown's normal exit path (connCount==0) must call connsWG.Wait()
 	// before returning. Without it, serve() goroutines are still mid-cleanup (between
@@ -82,7 +121,7 @@ func TestServer_ShutdownWaitsForServeGoroutines(t *testing.T) {
 		MaxConnections:  10,
 		MaxMessageSize:  1024 * 1024,
 		ConnReadTimeout: 50 * time.Millisecond,
-	}, q, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, q, q, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	go srv.Start()
 	t.Cleanup(func() { q.Close() })

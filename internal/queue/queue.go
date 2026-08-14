@@ -10,6 +10,7 @@ import (
 
 // Queue buffers incoming envelopes and dispatches them to workers.
 type Queue struct {
+	name       string
 	ch         chan *envelope.Envelope
 	closeOnce  sync.Once
 	closed     bool
@@ -21,7 +22,16 @@ type Queue struct {
 
 // New creates a queue with the given capacity.
 func New(capacity int) *Queue {
+	return NewNamed("default", capacity)
+}
+
+// NewNamed creates a named queue with the given capacity.
+func NewNamed(name string, capacity int) *Queue {
+	if name == "" {
+		name = "default"
+	}
 	return &Queue{
+		name: name,
 		ch:   make(chan *envelope.Envelope, capacity),
 		done: make(chan struct{}),
 	}
@@ -44,7 +54,7 @@ func (q *Queue) Enqueue(env *envelope.Envelope) bool {
 	case <-q.done:
 		return false
 	case q.ch <- env:
-		metrics.QueueDepthSet(len(q.ch))
+		q.reportDepth()
 		return true
 	}
 }
@@ -59,14 +69,14 @@ func (q *Queue) Start(n int, fn func(*envelope.Envelope)) {
 				select {
 				case env := <-q.ch:
 					fn(env)
-					metrics.QueueDepthSet(len(q.ch))
+					q.reportDepth()
 				case <-q.done:
 					q.producers.Wait()
 					for {
 						select {
 						case env := <-q.ch:
 							fn(env)
-							metrics.QueueDepthSet(len(q.ch))
+							q.reportDepth()
 						default:
 							return
 						}
@@ -96,3 +106,7 @@ func (q *Queue) Close() {
 
 // Len returns the current queue depth.
 func (q *Queue) Len() int { return len(q.ch) }
+
+func (q *Queue) reportDepth() {
+	metrics.QueueDepthSetForQueue(q.name, len(q.ch))
+}

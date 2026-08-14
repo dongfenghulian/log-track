@@ -20,31 +20,7 @@ func TestInit_RegistersHandler(t *testing.T) {
 	}
 }
 
-func TestHandle_RejectsMissingMethod(t *testing.T) {
-	body := mustMarshal(map[string]any{"url": "/x", "response_status": 200})
-	err := (&Handler{}).Handle(&envelope.Envelope{Topic: envelope.TopicInboundHTTPLogs, Data: body})
-	if err == nil {
-		t.Errorf("missing method should error")
-	}
-}
-
-func TestHandle_RejectsMissingURL(t *testing.T) {
-	body := mustMarshal(map[string]any{"method": "GET", "response_status": 200})
-	err := (&Handler{}).Handle(&envelope.Envelope{Topic: envelope.TopicInboundHTTPLogs, Data: body})
-	if err == nil {
-		t.Errorf("missing url should error")
-	}
-}
-
-func TestHandle_RejectsMissingStatus(t *testing.T) {
-	body := mustMarshal(map[string]any{"method": "GET", "url": "/x"})
-	err := (&Handler{}).Handle(&envelope.Envelope{Topic: envelope.TopicInboundHTTPLogs, Data: body})
-	if err == nil {
-		t.Errorf("missing response_status should error")
-	}
-}
-
-func TestHandle_PassesValidEnvelopeToWriter(t *testing.T) {
+func TestHandle_PassesEnvelopeToWriterWithoutBusinessValidation(t *testing.T) {
 	var written atomic.Int32
 	writeradapter.Set(func(env *envelope.Envelope) {
 		if env.Topic == envelope.TopicInboundHTTPLogs {
@@ -53,20 +29,21 @@ func TestHandle_PassesValidEnvelopeToWriter(t *testing.T) {
 	})
 	defer writeradapter.Set(func(*envelope.Envelope) {})
 
-	body := mustMarshal(map[string]any{"method": "GET", "url": "/x", "response_status": 200})
-	err := (&Handler{}).Handle(&envelope.Envelope{Topic: envelope.TopicInboundHTTPLogs, Data: body})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	cases := [][]byte{
+		mustMarshal(map[string]any{"method": "GET", "url": "/x", "response_status": 200}),
+		mustMarshal(map[string]any{"url": "/x", "response_status": 200}),
+		mustMarshal(map[string]any{"method": "GET", "response_status": 200}),
+		mustMarshal(map[string]any{"method": "GET", "url": "/x"}),
+		[]byte("not json"),
 	}
-	if written.Load() != 1 {
-		t.Errorf("expected 1 write, got %d", written.Load())
+	for _, body := range cases {
+		err := (&Handler{}).Handle(&envelope.Envelope{Topic: envelope.TopicInboundHTTPLogs, Data: body})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	}
-}
-
-func TestHandle_RejectsMalformedJSON(t *testing.T) {
-	err := (&Handler{}).Handle(&envelope.Envelope{Topic: envelope.TopicInboundHTTPLogs, Data: []byte("not json")})
-	if err == nil {
-		t.Errorf("malformed JSON should error")
+	if written.Load() != int32(len(cases)) {
+		t.Errorf("expected %d writes, got %d", len(cases), written.Load())
 	}
 }
 

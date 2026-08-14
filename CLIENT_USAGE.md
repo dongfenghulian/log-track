@@ -52,9 +52,10 @@ func main() {
 | ---------------- | ---- | --------------- | ------------------------------------------------------- |
 | `GatewayAddr`    | 否   | `log-track:9583`| LogTrack Gateway 的 `host:port`                         |
 | `ServiceName`    | 是   | -               | 你的服务名，会写入信封 `service` 字段                   |
-| `MaxConns`       | 否   | 4               | 最大 TCP 长连接数（按 trace_id 哈希分槽，懒建）        |
+| `MaxConns`       | 否   | 4               | 每个连接池的 TCP 长连接数（event-tracks 和普通 topic 各一组，按 trace_id 哈希分槽，懒建） |
 | `ConnectTimeout` | 否   | 3s              | 建立 TCP 连接超时                                       |
 | `WriteTimeout`   | 否   | 1s              | 单次消息写入超时                                        |
+| `FailureBackoff` | 否   | 5s              | 普通 topic 发送失败后的重连退避；event-tracks 会持续尝试 |
 | `Logger`         | 否   | `slog.Default()`| 发送失败时的本地日志输出                                |
 
 ### 环境变量

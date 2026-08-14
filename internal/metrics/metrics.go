@@ -22,10 +22,10 @@ var (
 		Help: "Number of messages routed, by topic and outcome.",
 	}, []string{"topic", "outcome"})
 
-	queueDepth = prometheus.NewGauge(prometheus.GaugeOpts{
+	queueDepth = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "logtrack_gateway_queue_depth",
 		Help: "Current depth of the in-memory message queue.",
-	})
+	}, []string{"queue"})
 
 	queueDropsTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "logtrack_gateway_queue_drops_total",
@@ -85,8 +85,8 @@ func init() {
 func Handler() http.Handler { return promhttp.Handler() }
 
 // ConnInc / ConnDec track active TCP connections.
-func ConnInc()      { connections.Inc() }
-func ConnDec()      { connections.Dec() }
+func ConnInc() { connections.Inc() }
+func ConnDec() { connections.Dec() }
 
 // MessageObserved records the per-topic processing outcome.
 //
@@ -96,7 +96,12 @@ func MessageObserved(topic, outcome string) {
 }
 
 // QueueDepthSet should be called periodically (or on every enqueue, cheap enough).
-func QueueDepthSet(n int) { queueDepth.Set(float64(n)) }
+func QueueDepthSet(n int) { QueueDepthSetForQueue("default", n) }
+
+// QueueDepthSetForQueue records depth for a named queue.
+func QueueDepthSetForQueue(queue string, n int) {
+	queueDepth.WithLabelValues(queue).Set(float64(n))
+}
 
 // QueueDropInc — kept for future back-pressure mode.
 func QueueDropInc() { queueDropsTotal.Inc() }

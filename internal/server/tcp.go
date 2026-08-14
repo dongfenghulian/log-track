@@ -23,9 +23,10 @@ type Config struct {
 }
 
 type Server struct {
-	cfg    Config
-	queue  *queue.Queue
-	logger *slog.Logger
+	cfg           Config
+	normalQueue   *queue.Queue
+	criticalQueue *queue.Queue
+	logger        *slog.Logger
 
 	listenerMu sync.Mutex
 	listener   net.Listener
@@ -39,16 +40,17 @@ type Server struct {
 	shutdownMode  atomic.Bool // when true, conn read loops use ConnReadTimeout
 }
 
-func New(cfg Config, q *queue.Queue, logger *slog.Logger) *Server {
+func New(cfg Config, normalQueue *queue.Queue, criticalQueue *queue.Queue, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Server{
-		cfg:        cfg,
-		queue:      q,
-		logger:     logger,
-		conns:      make(map[net.Conn]struct{}),
-		acceptDone: make(chan struct{}),
+		cfg:           cfg,
+		normalQueue:   normalQueue,
+		criticalQueue: criticalQueue,
+		logger:        logger,
+		conns:         make(map[net.Conn]struct{}),
+		acceptDone:    make(chan struct{}),
 	}
 }
 
@@ -121,7 +123,13 @@ func (s *Server) serve(conn net.Conn) {
 			metrics.MessageObserved(env.Topic, "version_dropped")
 			continue
 		}
-		if ok := s.queue.Enqueue(env); !ok {
+		var q *queue.Queue
+		if env.Topic == envelope.TopicEventTracks {
+			q = s.criticalQueue
+		} else {
+			q = s.normalQueue
+		}
+		if ok := q.Enqueue(env); !ok {
 			return
 		}
 	}
@@ -138,7 +146,8 @@ func (s *Server) Shutdown(ctx context.Context) {
 		select {
 		case <-s.acceptDone:
 		case <-ctx.Done():
-			s.queue.StopEnqueue()
+			s.normalQueue.StopEnqueue()
+			s.criticalQueue.StopEnqueue()
 			s.forceCloseAll()
 			s.connsWG.Wait()
 			return
@@ -158,7 +167,8 @@ func (s *Server) Shutdown(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
-			s.queue.StopEnqueue()
+			s.normalQueue.StopEnqueue()
+			s.criticalQueue.StopEnqueue()
 			s.forceCloseAll()
 			s.connsWG.Wait()
 			return

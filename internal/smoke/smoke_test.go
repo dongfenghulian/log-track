@@ -62,29 +62,33 @@ func TestSmokeFallbackPath(t *testing.T) {
 	writeradapter.Set(mgr.Write)
 
 	pass := &passthrough.Handler{}
-	q := queue.New(cfg.Server.QueueSize)
-	q.Start(4, func(env *envelope.Envelope) {
+	dispatch := func(env *envelope.Envelope) {
 		h, ok := router.Lookup(env.Topic)
 		if !ok {
 			_ = pass.Handle(env)
 			return
 		}
 		_ = h.Handle(env)
-	})
+	}
+	normalQ := queue.NewNamed("normal", cfg.Server.QueueSize)
+	criticalQ := queue.NewNamed("critical", cfg.Server.CriticalQueueSize)
+	normalQ.Start(4, dispatch)
+	criticalQ.Start(2, dispatch)
 
 	srv := server.New(server.Config{
 		Address:         cfg.Server.Address,
 		MaxConnections:  cfg.Server.MaxConnections,
 		MaxMessageSize:  cfg.Server.MaxMessageSize,
 		ConnReadTimeout: cfg.Shutdown.ConnReadTimeout,
-	}, q, logger)
+	}, normalQ, criticalQ, logger)
 	go func() { _ = srv.Start() }()
 
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
-		q.Close()
+		normalQ.Close()
+		criticalQ.Close()
 	})
 
 	waitForListen(t, addr)

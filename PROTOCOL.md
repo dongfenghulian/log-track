@@ -59,7 +59,7 @@
 
 ### 1.4 Topic 路由
 
-- 命中内置 handler（topic 为 `inbound-http-logs / outbound-http-logs / event-tracks / rpc-calls / app-logs`）：走 handler 校验后写入对应 Kafka topic（注意 `app-logs` 不是 Kafka topic，handler 会按 level 改写为 `app-logs-error / app-logs-warn / app-logs-info / app-logs-debug` 之一）
+- 命中内置 handler（topic 为 `inbound-http-logs / outbound-http-logs / event-tracks / rpc-calls / app-logs`）：写入对应 Kafka topic；其中 `inbound-http-logs / outbound-http-logs / event-tracks` 不做业务字段校验（注意 `app-logs` 不是 Kafka topic，handler 会按 level 改写为 `app-logs-error / app-logs-warn / app-logs-info / app-logs-debug` 之一）
 - 未命中：将完整信封 JSON 直接写入名为 `topic` 字段值的 Kafka topic，由业务方自行确保该 topic 已在 Kafka 创建
 
 ---

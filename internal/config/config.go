@@ -17,12 +17,14 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Address        string
-	MaxConnections int
-	QueueSize      int
-	WorkerCount    int
-	MaxMessageSize int
-	MetricsAddress string // ":9090" by default
+	Address              string
+	MaxConnections       int
+	QueueSize            int
+	WorkerCount          int
+	CriticalQueueSize    int
+	CriticalWorkerCount  int
+	MaxMessageSize       int
+	MetricsAddress       string // ":9090" by default
 }
 
 type KafkaConfig struct {
@@ -48,12 +50,14 @@ type ShutdownConfig struct {
 func Load() Config {
 	return Config{
 		Server: ServerConfig{
-			Address:        getString("LOG_TRACK_SERVER_ADDRESS", ":9583"),
-			MaxConnections: getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 3000),
-			QueueSize:      getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 5000),
-			WorkerCount:    getInt("LOG_TRACK_SERVER_WORKER_COUNT", 30),
-			MaxMessageSize: getInt("LOG_TRACK_SERVER_MAX_MESSAGE_SIZE", 10*1024*1024),
-			MetricsAddress: getString("LOG_TRACK_METRICS_ADDRESS", ":9584"),
+			Address:             getString("LOG_TRACK_SERVER_ADDRESS", ":9583"),
+			MaxConnections:      getInt("LOG_TRACK_SERVER_MAX_CONNECTIONS", 3000),
+			QueueSize:           getInt("LOG_TRACK_SERVER_QUEUE_SIZE", 5000),
+			WorkerCount:         getInt("LOG_TRACK_SERVER_WORKER_COUNT", 30),
+			CriticalQueueSize:   getInt("LOG_TRACK_SERVER_CRITICAL_QUEUE_SIZE", 2000),
+			CriticalWorkerCount: getInt("LOG_TRACK_SERVER_CRITICAL_WORKER_COUNT", 10),
+			MaxMessageSize:      getInt("LOG_TRACK_SERVER_MAX_MESSAGE_SIZE", 10*1024*1024),
+			MetricsAddress:      getString("LOG_TRACK_METRICS_ADDRESS", ":9584"),
 		},
 		Kafka: KafkaConfig{
 			Brokers:      splitCSV(getString("LOG_TRACK_KAFKA_BROKERS", "kafka:9092")),

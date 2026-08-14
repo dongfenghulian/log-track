@@ -212,19 +212,19 @@ func TestClient_ShardIndex_DistributesByTraceID(t *testing.T) {
 	c, _ := New(&Config{GatewayAddr: "127.0.0.1:1", ServiceName: "x", MaxConns: 4, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	defer c.Close()
 
-	if got := c.shardIndex(""); got != 0 {
+	if got := c.shardIndex("", 4); got != 0 {
 		t.Errorf("empty trace_id should map to shard 0, got %d", got)
 	}
 
 	// Same trace_id is deterministic; different IDs should not all collapse to shard 0.
-	a := c.shardIndex("trace-A")
-	b := c.shardIndex("trace-A")
+	a := c.shardIndex("trace-A", 4)
+	b := c.shardIndex("trace-A", 4)
 	if a != b {
 		t.Errorf("not deterministic: %d vs %d", a, b)
 	}
 	seen := map[int]struct{}{}
 	for i := 0; i < 100; i++ {
-		seen[c.shardIndex("trace-"+string(rune('A'+i%26))+string(rune('0'+i/26)))] = struct{}{}
+		seen[c.shardIndex("trace-"+string(rune('A'+i%26))+string(rune('0'+i/26)), 4)] = struct{}{}
 	}
 	if len(seen) < 2 {
 		t.Errorf("trace_id hash should hit multiple shards, got %d distinct", len(seen))
@@ -398,19 +398,19 @@ func TestClient_DialFailureBackoffSkipsImmediateReconnect(t *testing.T) {
 	defer c.Close()
 
 	c.send("topic", map[string]any{"x": 1}, "", "")
-	first := c.shards[0].nextAttempt
+	first := c.normalShards[0].nextAttempt
 	if first.IsZero() {
 		t.Fatal("dial failure did not set nextAttempt")
 	}
 
 	c.send("topic", map[string]any{"x": 2}, "", "")
-	if got := c.shards[0].nextAttempt; !got.Equal(first) {
+	if got := c.normalShards[0].nextAttempt; !got.Equal(first) {
 		t.Fatalf("backoff send should not redial or move nextAttempt: got %v want %v", got, first)
 	}
 
 	time.Sleep(250 * time.Millisecond)
 	c.send("topic", map[string]any{"x": 3}, "", "")
-	if got := c.shards[0].nextAttempt; !got.After(first) {
+	if got := c.normalShards[0].nextAttempt; !got.After(first) {
 		t.Fatalf("send after backoff should retry and extend nextAttempt: got %v first %v", got, first)
 	}
 }
@@ -437,13 +437,13 @@ func TestClient_BackoffSkipsBeforeSerialize(t *testing.T) {
 	defer c.Close()
 
 	c.send("topic", map[string]any{"x": 1}, "", "")
-	first := c.shards[0].nextAttempt
+	first := c.normalShards[0].nextAttempt
 	if first.IsZero() {
 		t.Fatal("dial failure did not set nextAttempt")
 	}
 
 	c.send("topic", map[string]any{"bad": make(chan struct{})}, "", "")
-	if got := c.shards[0].nextAttempt; !got.Equal(first) {
+	if got := c.normalShards[0].nextAttempt; !got.Equal(first) {
 		t.Fatalf("backoff send should skip before serialization: got %v want %v", got, first)
 	}
 }
@@ -470,11 +470,11 @@ func TestClient_EventTracksBypassesFailureBackoff(t *testing.T) {
 	defer c.Close()
 
 	c.send(envelope.TopicEventTracks, map[string]any{"x": 1}, "", "")
-	if got := c.shards[0].nextAttempt; !got.IsZero() {
+	if got := c.eventShards[0].nextAttempt; !got.IsZero() {
 		t.Fatalf("event-tracks should not enter failure backoff, got %v", got)
 	}
 	c.send(envelope.TopicEventTracks, map[string]any{"x": 2}, "", "")
-	if got := c.shards[0].nextAttempt; !got.IsZero() {
+	if got := c.eventShards[0].nextAttempt; !got.IsZero() {
 		t.Fatalf("event-tracks should keep retrying without backoff, got %v", got)
 	}
 }
@@ -495,26 +495,34 @@ func TestClient_EventTracksReconnectClearsFailureBackoff(t *testing.T) {
 	}
 	defer c.Close()
 
-	s := c.shards[0]
-	s.mu.Lock()
-	s.nextAttempt = time.Now().Add(c.failureBackoff)
-	s.mu.Unlock()
+	// Inject backoff on the normal shard — normal sends must be skipped.
+	ns := c.normalShards[0]
+	ns.mu.Lock()
+	ns.nextAttempt = time.Now().Add(c.failureBackoff)
+	ns.mu.Unlock()
 
 	c.send("topic", map[string]any{"i": 1}, "", "")
 	if got := len(fs.envelopes()); got != 0 {
 		t.Fatalf("normal topic should be skipped during backoff, got %d envelopes", got)
 	}
 
+	// event-tracks use a separate shard pool — must go through unaffected.
 	c.send(envelope.TopicEventTracks, map[string]any{"i": 2}, "", "")
 	waitForEnvelopes(t, fs, 1, 2*time.Second)
 
-	s.mu.Lock()
-	nextAttempt := s.nextAttempt
-	s.mu.Unlock()
+	// After a successful event-tracks send, its shard backoff should be clear.
+	es := c.eventShards[0]
+	es.mu.Lock()
+	nextAttempt := es.nextAttempt
+	es.mu.Unlock()
 	if !nextAttempt.IsZero() {
-		t.Fatalf("successful event-tracks reconnect should clear backoff, got %v", nextAttempt)
+		t.Fatalf("successful event-tracks send should not set backoff, got %v", nextAttempt)
 	}
 
+	// Normal shard backoff is still in place; once it expires, normal sends work.
+	ns.mu.Lock()
+	ns.nextAttempt = time.Time{}
+	ns.mu.Unlock()
 	c.send("topic", map[string]any{"i": 3}, "", "")
 	waitForEnvelopes(t, fs, 2, 2*time.Second)
 }
@@ -539,11 +547,11 @@ func TestClient_EventTracksWriteFailureBypassesFailureBackoff(t *testing.T) {
 	large := string(make([]byte, 8*1024*1024))
 	for i := 0; i < 20; i++ {
 		c.send(envelope.TopicEventTracks, map[string]any{"x": large}, "", "")
-		if c.shards[0].conn == nil {
+		if c.eventShards[0].conn == nil {
 			break
 		}
 	}
-	if got := c.shards[0].nextAttempt; !got.IsZero() {
+	if got := c.eventShards[0].nextAttempt; !got.IsZero() {
 		t.Fatalf("event-tracks write failure should not enter backoff, got %v", got)
 	}
 }
@@ -568,17 +576,17 @@ func TestClient_WriteFailureBackoffSkipsImmediateReconnect(t *testing.T) {
 	large := string(make([]byte, 8*1024*1024))
 	for i := 0; i < 20; i++ {
 		c.send("topic", map[string]any{"x": large}, "", "")
-		if !c.shards[0].nextAttempt.IsZero() {
+		if !c.normalShards[0].nextAttempt.IsZero() {
 			break
 		}
 	}
 
-	first := c.shards[0].nextAttempt
+	first := c.normalShards[0].nextAttempt
 	if first.IsZero() {
 		t.Fatal("write failure did not set nextAttempt")
 	}
 	c.send("topic", map[string]any{"x": large}, "", "")
-	if got := c.shards[0].nextAttempt; !got.Equal(first) {
+	if got := c.normalShards[0].nextAttempt; !got.Equal(first) {
 		t.Fatalf("backoff send should not redial or move nextAttempt: got %v want %v", got, first)
 	}
 }
@@ -632,8 +640,11 @@ func TestNew_AppliesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if len(c.shards) != defaultMaxConns {
-		t.Errorf("shards=%d", len(c.shards))
+	if len(c.normalShards) != defaultMaxConns {
+		t.Errorf("normalShards=%d", len(c.normalShards))
+	}
+	if len(c.eventShards) != defaultMaxConns {
+		t.Errorf("eventShards=%d", len(c.eventShards))
 	}
 	if c.connectTimeout != defaultConnectTimeout {
 		t.Errorf("connectTimeout=%v", c.connectTimeout)
