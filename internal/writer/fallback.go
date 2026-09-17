@@ -21,6 +21,11 @@ import (
 // FallbackWriter persists envelopes as JSON Lines into rolling files when Kafka is down.
 //
 // File naming: <ts>.log (writing) → <ts>.log.done (rolled, ready for replay).
+// Each line is one of:
+//   - full envelope JSON (default path), or
+//   - {"_fmt":"raw-v1", ...} record for WriteRaw envelopes whose Kafka contract expects
+//     the bare payload as the message value.
+//
 // On Write: append a JSON line; if the file exceeds maxFileSize, rotate.
 // On Peek: scan oldest .log.done first, return the first unacked record (record ID = file:offset).
 // On Ack: bookkeeping only flushes when the .done file is fully drained → delete it.
@@ -42,6 +47,19 @@ type FallbackWriter struct {
 	// peekState tracks the file currently being drained on the recovery side.
 	peekState *peekFile
 }
+
+// fallbackRawRecord is the on-disk format for WriteRaw envelopes (bare-payload topics).
+// _fmt="raw-v1" distinguishes it from a full envelope line and carries format version
+// so future format changes can use "raw-v2" etc. without adding new fields.
+type fallbackRawRecord struct {
+	Fmt          string          `json:"_fmt"`
+	Topic        string          `json:"topic"`
+	PartitionKey string          `json:"partition_key,omitempty"`
+	TraceID      string          `json:"trace_id,omitempty"`
+	Data         json.RawMessage `json:"data"`
+}
+
+const fallbackRawFmt = "raw-v1"
 
 type peekFile struct {
 	path    string
@@ -106,8 +124,14 @@ func (f *FallbackWriter) Write(env *envelope.Envelope) error {
 			return err
 		}
 	}
-	env.EnsureTimestampAt()
-	body, err := json.Marshal(env)
+	var body []byte
+	var err error
+	if env.WriteRaw {
+		body, err = json.Marshal(&fallbackRawRecord{Fmt: fallbackRawFmt, Topic: env.Topic, PartitionKey: env.PartitionKey, TraceID: env.TraceID, Data: env.Data})
+	} else {
+		env.EnsureTimestampAt()
+		body, err = json.Marshal(env)
+	}
 	if err != nil {
 		return err
 	}
@@ -215,6 +239,27 @@ func (f *FallbackWriter) Peek() (*FallbackRecord, bool) {
 		}
 		if f.peekState.scanner.Scan() {
 			line := f.peekState.scanner.Bytes()
+			// Check for raw-payload record first.
+			var probe struct {
+				Fmt string `json:"_fmt"`
+			}
+			if err := json.Unmarshal(line, &probe); err != nil {
+				continue
+			}
+			if probe.Fmt == fallbackRawFmt {
+				var rec fallbackRawRecord
+				if err := json.Unmarshal(line, &rec); err != nil {
+					continue
+				}
+				env := &envelope.Envelope{
+					Topic:        rec.Topic,
+					PartitionKey: rec.PartitionKey,
+					TraceID:      rec.TraceID,
+					Data:         rec.Data,
+					WriteRaw:     true,
+				}
+				return &FallbackRecord{Env: env, file: f.peekState.path}, true
+			}
 			var env envelope.Envelope
 			if err := json.Unmarshal(line, &env); err != nil {
 				continue

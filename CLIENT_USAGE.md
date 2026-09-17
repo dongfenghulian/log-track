@@ -52,10 +52,10 @@ func main() {
 | ---------------- | ---- | --------------- | ------------------------------------------------------- |
 | `GatewayAddr`    | 否   | `log-track:9583`| LogTrack Gateway 的 `host:port`                         |
 | `ServiceName`    | 是   | -               | 你的服务名，会写入信封 `service` 字段                   |
-| `MaxConns`       | 否   | 4               | 每个连接池的 TCP 长连接数（event-tracks 和普通 topic 各一组，按 trace_id 哈希分槽，懒建） |
+| `MaxConns`       | 否   | 4               | 每个连接池的 TCP 长连接数（event 池和 normal 池各一组，按 trace_id 哈希分槽，懒建） |
 | `ConnectTimeout` | 否   | 3s              | 建立 TCP 连接超时                                       |
 | `WriteTimeout`   | 否   | 1s              | 单次消息写入超时                                        |
-| `FailureBackoff` | 否   | 5s              | 普通 topic 发送失败后的重连退避；event-tracks 会持续尝试 |
+| `FailureBackoff` | 否   | 5s              | normal 池 topic 发送失败后的重连退避；event 池固定使用 500ms 短退避，不受此项影响 |
 | `Logger`         | 否   | `slog.Default()`| 发送失败时的本地日志输出                                |
 
 ### 环境变量
@@ -66,7 +66,7 @@ func main() {
 
 ---
 
-## 三、五个内置 helper
+## 三、八个内置 helper
 
 每个 helper 对应一个内置 topic。所有 helper 都是**同步直发**——调用立即返回，发送在调用线程内完成（最长 `WriteTimeout`）。
 
@@ -266,6 +266,78 @@ logtrack.App(&logtrack.AppLog{
 > 未知 level 会被拒绝丢弃。
 > 业务方需提前在 Kafka 创建好这 4 个 topic（auto-create 开启的话会自动建）。
 
+### 3.6 App 事件（app.app-event-v1）
+
+对应契约：`app.app-event-v1`，下游落 `event_app_di`。`event_id` 全局唯一，作去重键，由调用方生成（ULID/UUID）。
+
+```go
+logtrack.SendAppMessage(&logtrack.AppMessage{
+    EventID:     "01HXAB...ULID",          // 必填，全局唯一去重键，调用方生成
+    EventName:   "loan_apply_click",        // 必填
+    EventTime:   time.Now().UnixMilli(),    // 必填，Unix 毫秒时间戳
+    RequestID:   "req-8f3a...",             // 必填
+    DeviceUUID:  "d4e5f6-uuid",            // 必填
+    BID:         "id01",                   // 必填
+    AppID:       101,                      // 必填
+    IsTest:      0,
+    UserID:      10086,
+    GroupUserID: 20086,
+    AppVersion:  "3.12.0",
+    Mobile:      "token_char28...",        // 有则作分区键，否则用 DeviceUUID
+    FI:          map[string]int64{"amount": 500000, "term": 30},
+    FF:          map[string]float64{"apr": 0.36},
+    FS:          map[string]string{"from_page": "home", "button": "apply"},
+    PayloadJSON: map[string]any{"any": "object"},
+}, logtrack.WithTraceID(traceID))
+```
+
+> partition key 优先用 `Mobile`，为空时退回 `DeviceUUID`。
+
+### 3.7 系统日志事件（sys.sys-event-v1）
+
+对应契约：`sys.sys-event-v1`，下游落 `event_sys_di`。适用于服务、Flink 作业、批处理管道等产生的 `WARN` / `ERROR` / `FATAL` 级别事件。
+
+```go
+logtrack.SendSysMessage(&logtrack.SysMessage{
+    EventID:      "01HXAB...ULID",                   // 必填，全局唯一去重键，调用方生成
+    EventTime:    time.Now().UnixMilli(),             // 必填，Unix 毫秒时间戳
+    SourceSystem: "loan-backend",                     // 必填
+    Level:        logtrack.LevelError,                // 必填：LevelWarn / LevelError / LevelFatal
+    Message:      "failed to disburse loan",          // 必填
+    EventCode:    "DISBURSE_FAILED",                  // event_code 和 event_type 至少填一个
+    JobName:      "disbursement-worker",
+    Component:    "DisburseService",
+    Env:          "prod",
+    BID:          "id01",
+    AppID:        101,
+    RequestID:    "req-8f3a...",
+    EntityRef:    "AP20250825001",
+    StackTrace:   string(debug.Stack()),
+    ContextJSON:  map[string]any{"loan_id": "L_10086", "retry": 3},
+    Host:         "pod-abc",
+    AppVersion:   "1.4.2",
+}, logtrack.WithTraceID(traceID))
+```
+
+> `event_code` 与 `event_type` 至少填一个；`fingerprint` 由 Flink 按统一算法兜底计算，生产者不需要自算。若自算须带 `fp_v1:` 前缀并逐字节对齐 Flink UDF（见契约 `sys-event-kafka-contract.md` "fingerprint 归并算法"节），否则以 Flink 重算为准。
+
+### 3.8 实验分流事件（dw.exp-assignment-v1）
+
+对应契约：`dw.exp-assignment-v1`，下游落 `exp_assignment_di`。一个主体同时命中多个正交实验时，每个实验发一条消息。
+
+```go
+logtrack.SendExpAssignmentMessage(&logtrack.ExpAssignmentMessage{
+    EventID:        "evt_0825_abc123",        // 可选，仅供审计
+    ExperimentID:   "risk_score_cutoff_0825", // 必填
+    SubjectID:      "AP20250825001",          // 必填，含义随实验粒度变（user_id / application_no 等）
+    Variant:        "treatment",              // 必填
+    AssignedTimeMS: time.Now().UnixMilli(),   // 必填，Unix 毫秒时间戳
+})
+```
+
+> partition key 固定为 `[experiment_id, subject_id]` JSON 数组，保证同主体在同实验的重分流消息落同一分区。  
+> 去重键为 `(experiment_id, subject_id)`，重分流只需再发一条更大的 `assigned_time_ms`，结果表后到覆盖。
+
 ---
 
 ## 四、自定义 topic：`Send`
@@ -368,7 +440,9 @@ SDK **不依赖 ACK，不重试**。任何失败都通过 `Config.Logger`（默�
 
 ## 八、连接模型与并发
 
-- 默认 4 条 TCP 长连接，按 `trace_id` FNV 哈希分槽
+- 两个独立连接池，各默认 4 条 TCP 长连接（共 8 条）：
+  - **event 池**：`event-tracks`、`app.app-event-v1`、`sys.sys-event-v1`、`dw.exp-assignment-v1`——失败后 **500ms 短退避**（硬编码，不受 `FailureBackoff` 影响），退避窗口内的消息静默丢弃
+  - **normal 池**：其他所有 topic——失败后退避 `FailureBackoff`（默认 5s），退避窗口内的消息静默丢弃
 - 同一 `trace_id` → 固定走同一条连接（保证同 trace 在 Kafka 单 partition 内顺序）
 - 没有 `trace_id` 的调用都走 shard 0
 - 每条连接懒建：业务首次命中该 shard 才 dial

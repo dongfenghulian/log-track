@@ -16,6 +16,9 @@ const (
 	TopicOutboundHTTPLogs = "outbound-http-logs"
 	TopicEventTracks      = "event-tracks"
 	TopicRPCCalls         = "rpc-calls"
+	TopicAppEvent         = "app.app-event-v1"
+	TopicSysEvent         = "sys.sys-event-v1"
+	TopicExpAssignment    = "dw.exp-assignment-v1"
 
 	// TopicAppLogs is the SDK-side topic name; the gateway accepts envelopes with this topic
 	// and rewrites env.Topic to one of the per-level topics below before writing to Kafka.
@@ -39,6 +42,12 @@ type Envelope struct {
 	TraceID      string          `json:"trace_id,omitempty"`
 	PartitionKey string          `json:"partition_key,omitempty"`
 	Data         json.RawMessage `json:"data"`
+
+	// WriteRaw instructs the kafka writer to use Data as the Kafka message value directly,
+	// bypassing full envelope serialization. Used by handlers whose Kafka topic contract
+	// expects bare payload (e.g. app.app-event-v1, sys.sys-event-v1, dw.exp-assignment-v1).
+	// Intentionally excluded from JSON so it cannot be set by SDK clients over the wire.
+	WriteRaw bool `json:"-"`
 }
 
 // TimestampAtFromTime formats an event time for the timestamp_at envelope field.

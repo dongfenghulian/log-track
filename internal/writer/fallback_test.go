@@ -377,3 +377,48 @@ func TestFallback_PeekUpdatesFallbackFilesGauge(t *testing.T) {
 		t.Errorf("post-peek gauge = %v, want 0 (Peek did not update fallback_files gauge on file deletion)", got)
 	}
 }
+
+func TestFallback_RawRecordRoundTrip(t *testing.T) {
+	// WriteRaw records are stored with a _fmt marker and reconstruct with WriteRaw=true on Peek,
+	// preserving the essential fields the raw-topic kafka writer needs (topic + partition key + data).
+	dir := t.TempDir()
+	fw, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fw.Write(&envelope.Envelope{Version: envelope.Version, Topic: "app-logs-info", Data: json.RawMessage(`{"level":"INFO"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fw.Write(&envelope.Envelope{Topic: "app.app-event-v1", PartitionKey: "user-1", Data: json.RawMessage(`{"event_id":"e1"}`), WriteRaw: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fw2, err := NewFallbackWriter(dir, 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fw2.Close()
+
+	seen := map[string]bool{}
+	for {
+		rec, ok := fw2.Peek()
+		if !ok {
+			break
+		}
+		if rec.Env.WriteRaw {
+			seen["raw:"+rec.Env.Topic] = true
+			if rec.Env.PartitionKey != "user-1" {
+				t.Errorf("raw record lost partition key: %q", rec.Env.PartitionKey)
+			}
+		} else {
+			seen["env:"+rec.Env.Topic] = true
+		}
+	}
+	if !seen["env:app-logs-info"] || !seen["raw:app.app-event-v1"] {
+		t.Errorf("peek missed records: seen=%v", seen)
+	}
+}

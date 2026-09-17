@@ -27,11 +27,12 @@ import (
 )
 
 const (
-	defaultGatewayAddr    = "log-track:9583"
-	defaultMaxConns       = 4
-	defaultConnectTimeout = 3 * time.Second
-	defaultWriteTimeout   = 1 * time.Second
-	defaultFailureBackoff = 5 * time.Second
+	defaultGatewayAddr      = "log-track:9583"
+	defaultMaxConns         = 4
+	defaultConnectTimeout   = 3 * time.Second
+	defaultWriteTimeout     = 1 * time.Second
+	defaultFailureBackoff   = 5 * time.Second
+	eventPoolFailureBackoff = 500 * time.Millisecond
 )
 
 // Config is supplied at Init time. Only GatewayAddr and ServiceName are required.
@@ -202,7 +203,7 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	c.closeMu.RUnlock()
 
 	var shards []*shardConn
-	if topic == envelope.TopicEventTracks {
+	if isEventTopic(topic) {
 		shards = c.eventShards
 	} else {
 		shards = c.normalShards
@@ -213,8 +214,11 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	backoffEnabled := topic != envelope.TopicEventTracks
-	if backoffEnabled && now.Before(s.nextAttempt) {
+	backoff := c.failureBackoff
+	if isEventTopic(topic) {
+		backoff = eventPoolFailureBackoff
+	}
+	if now.Before(s.nextAttempt) {
 		c.logger.Debug("logtrack: send skipped during failure backoff",
 			"stage", "backoff",
 			"topic", topic,
@@ -275,9 +279,7 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 				"shard", idx,
 				"size", len(frame),
 				"err", err)
-			if backoffEnabled {
-				s.nextAttempt = time.Now().Add(c.failureBackoff)
-			}
+			s.nextAttempt = time.Now().Add(backoff)
 			return
 		}
 		s.conn = conn
@@ -296,10 +298,19 @@ func (c *Client) send(topic string, data any, traceID, partitionKey string) {
 			"err", err)
 		_ = s.conn.Close()
 		s.conn = nil
-		if backoffEnabled {
-			s.nextAttempt = time.Now().Add(c.failureBackoff)
-		}
+		s.nextAttempt = time.Now().Add(backoff)
 	}
+}
+
+func isEventTopic(topic string) bool {
+	switch topic {
+	case envelope.TopicEventTracks,
+		envelope.TopicAppEvent,
+		envelope.TopicSysEvent,
+		envelope.TopicExpAssignment:
+		return true
+	}
+	return false
 }
 
 // encodeFrame serializes the envelope and prepends a 4-byte big-endian length prefix.

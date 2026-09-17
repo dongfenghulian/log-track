@@ -245,15 +245,14 @@ func TestClient_ReconnectsAfterServerCloses(t *testing.T) {
 	c.send(envelope.TopicEventTracks, map[string]any{"i": 1}, "", "")
 	waitForEnvelopes(t, fs, 1, 2*time.Second)
 
-	// Server closed mid-session. TCP half-close detection takes 1-2 writes:
-	// first write often succeeds into the kernel buffer (silently lost), second returns EPIPE
-	// which clears the conn, third reconnects and lands. Send several follow-ups; expect at
-	// least one to reach the server after reconnect.
-	for i := 2; i <= 6; i++ {
+	// Server closed mid-session. Event pool has a short 500ms backoff after write failure.
+	// Wait for it to expire, then send follow-ups; expect at least one to reconnect and land.
+	time.Sleep(eventPoolFailureBackoff + 100*time.Millisecond)
+	for i := 2; i <= 10; i++ {
 		c.send(envelope.TopicEventTracks, map[string]any{"i": i}, "", "")
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(eventPoolFailureBackoff + 100*time.Millisecond)
 	}
-	waitForEnvelopes(t, fs, 2, 3*time.Second) // first + at least one post-reconnect
+	waitForEnvelopes(t, fs, 2, 5*time.Second) // first + at least one post-reconnect
 }
 
 func TestInit_ClosesPreviousDefaultClient(t *testing.T) {
@@ -448,7 +447,7 @@ func TestClient_BackoffSkipsBeforeSerialize(t *testing.T) {
 	}
 }
 
-func TestClient_EventTracksBypassesFailureBackoff(t *testing.T) {
+func TestClient_EventTracksUsesShortFailureBackoff(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -469,13 +468,15 @@ func TestClient_EventTracksBypassesFailureBackoff(t *testing.T) {
 	}
 	defer c.Close()
 
+	before := time.Now()
 	c.send(envelope.TopicEventTracks, map[string]any{"x": 1}, "", "")
-	if got := c.eventShards[0].nextAttempt; !got.IsZero() {
-		t.Fatalf("event-tracks should not enter failure backoff, got %v", got)
+	got := c.eventShards[0].nextAttempt
+	if got.IsZero() {
+		t.Fatal("event-tracks dial failure should set a short backoff")
 	}
-	c.send(envelope.TopicEventTracks, map[string]any{"x": 2}, "", "")
-	if got := c.eventShards[0].nextAttempt; !got.IsZero() {
-		t.Fatalf("event-tracks should keep retrying without backoff, got %v", got)
+	// Backoff must be the short event pool value, well under the normal 5s.
+	if d := got.Sub(before); d > time.Second {
+		t.Fatalf("event-tracks backoff too long: %v, want <= 1s", d)
 	}
 }
 
@@ -527,7 +528,7 @@ func TestClient_EventTracksReconnectClearsFailureBackoff(t *testing.T) {
 	waitForEnvelopes(t, fs, 2, 2*time.Second)
 }
 
-func TestClient_EventTracksWriteFailureBypassesFailureBackoff(t *testing.T) {
+func TestClient_EventTracksWriteFailureUsesShortBackoff(t *testing.T) {
 	addr, closeFn := newIdleServer(t)
 	defer closeFn()
 
@@ -551,8 +552,14 @@ func TestClient_EventTracksWriteFailureBypassesFailureBackoff(t *testing.T) {
 			break
 		}
 	}
-	if got := c.eventShards[0].nextAttempt; !got.IsZero() {
-		t.Fatalf("event-tracks write failure should not enter backoff, got %v", got)
+	// nextAttempt is set at the moment of failure; verify it is short (≤ eventPoolFailureBackoff + small margin).
+	got := c.eventShards[0].nextAttempt
+	if got.IsZero() {
+		t.Fatal("event-tracks write failure should set a short backoff")
+	}
+	remaining := time.Until(got)
+	if remaining > eventPoolFailureBackoff+100*time.Millisecond {
+		t.Fatalf("event-tracks backoff too long: %v remaining, want <= %v", remaining, eventPoolFailureBackoff)
 	}
 }
 

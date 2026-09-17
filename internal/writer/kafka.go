@@ -68,10 +68,16 @@ func (k *KafkaWriter) writerFor(topic string) *kafka.Writer {
 // Per spec: built-in handlers may transform data before writing, but at the manager layer we always
 // serialize the full envelope. Handlers wrap us so they own that decision.
 func (k *KafkaWriter) Write(env *envelope.Envelope) error {
-	env.EnsureTimestampAt()
-	body, err := json.Marshal(env)
-	if err != nil {
-		return err
+	var body []byte
+	var err error
+	if env.WriteRaw {
+		body = env.Data
+	} else {
+		env.EnsureTimestampAt()
+		body, err = json.Marshal(env)
+		if err != nil {
+			return err
+		}
 	}
 	w := k.writerFor(env.Topic)
 	ctx, cancel := context.WithTimeout(context.Background(), k.writeTimeout)

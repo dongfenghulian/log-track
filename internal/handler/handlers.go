@@ -8,8 +8,11 @@ package handler
 
 import (
 	_ "github.com/dongfenghulian/log-track/internal/handler/app_log"
+	_ "github.com/dongfenghulian/log-track/internal/handler/app_message"
 	_ "github.com/dongfenghulian/log-track/internal/handler/event"
+	_ "github.com/dongfenghulian/log-track/internal/handler/exp_assignment_message"
 	_ "github.com/dongfenghulian/log-track/internal/handler/inbound_http"
 	_ "github.com/dongfenghulian/log-track/internal/handler/outbound_http"
 	_ "github.com/dongfenghulian/log-track/internal/handler/rpc"
+	_ "github.com/dongfenghulian/log-track/internal/handler/sys_message"
 )
