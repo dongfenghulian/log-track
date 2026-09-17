@@ -268,7 +268,7 @@ logtrack.App(&logtrack.AppLog{
 
 ### 3.6 App 事件（app.app-event-v1）
 
-对应契约：`app.app-event-v1`，下游落 `event_app_di`。`event_id` 全局唯一，作去重键，由调用方生成（ULID/UUID）。
+对应契约：[`app-event-kafka-contract.md`](https://github.com/dongfenghulian/go-sdk/blob/master/eventkafka/docs/contract/app-event-kafka-contract.md)，下游落 `event_app_di`。`event_id` 全局唯一，作去重键，由调用方生成（ULID/UUID）。
 
 ```go
 logtrack.SendAppMessage(&logtrack.AppMessage{
@@ -295,7 +295,7 @@ logtrack.SendAppMessage(&logtrack.AppMessage{
 
 ### 3.7 系统日志事件（sys.sys-event-v1）
 
-对应契约：`sys.sys-event-v1`，下游落 `event_sys_di`。适用于服务、Flink 作业、批处理管道等产生的 `WARN` / `ERROR` / `FATAL` 级别事件。
+对应契约：[`sys-event-kafka-contract.md`](https://github.com/dongfenghulian/go-sdk/blob/master/eventkafka/docs/contract/sys-event-kafka-contract.md)，下游落 `event_sys_di`。适用于服务、Flink 作业、批处理管道等产生的 `WARN` / `ERROR` / `FATAL` 级别事件。
 
 ```go
 logtrack.SendSysMessage(&logtrack.SysMessage{
@@ -319,11 +319,11 @@ logtrack.SendSysMessage(&logtrack.SysMessage{
 }, logtrack.WithTraceID(traceID))
 ```
 
-> `event_code` 与 `event_type` 至少填一个；`fingerprint` 由 Flink 按统一算法兜底计算，生产者不需要自算。若自算须带 `fp_v1:` 前缀并逐字节对齐 Flink UDF（见契约 `sys-event-kafka-contract.md` "fingerprint 归并算法"节），否则以 Flink 重算为准。
+> `event_code` 与 `event_type` 至少填一个；`fingerprint` 由 Flink 按统一算法兜底计算，生产者不需要自算。若自算须带 `fp_v1:` 前缀并逐字节对齐 Flink UDF（见契约 [`sys-event-kafka-contract.md`](https://github.com/dongfenghulian/go-sdk/blob/master/eventkafka/docs/contract/sys-event-kafka-contract.md) "fingerprint 归并算法"节），否则以 Flink 重算为准。
 
 ### 3.8 实验分流事件（dw.exp-assignment-v1）
 
-对应契约：`dw.exp-assignment-v1`，下游落 `exp_assignment_di`。一个主体同时命中多个正交实验时，每个实验发一条消息。
+对应契约：[`exp-assignment-event-contract.md`](https://github.com/dongfenghulian/go-sdk/blob/master/eventkafka/docs/contract/exp-assignment-event-contract.md)，下游落 `exp_assignment_di`。一个主体同时命中多个正交实验时，每个实验发一条消息。
 
 ```go
 logtrack.SendExpAssignmentMessage(&logtrack.ExpAssignmentMessage{
